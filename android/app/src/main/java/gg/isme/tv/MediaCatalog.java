@@ -83,6 +83,9 @@ final class MediaCatalog {
             movie.put("title", title);
             movie.put("type", "Movie");
             movie.put("description", meta.optString("description", ""));
+            if (meta.optJSONArray("genres") != null) movie.put("genres", meta.optJSONArray("genres"));
+            else if (meta.optJSONArray("genre") != null) movie.put("genres", meta.optJSONArray("genre"));
+            if (!meta.isNull("runtime")) movie.put("runtime", meta.optString("runtime", ""));
             movie.put("year", meta.optString("releaseInfo", "").matches("^\\d{4}.*")
                 ? Integer.parseInt(meta.optString("releaseInfo").substring(0, 4)) : JSONObject.NULL);
             movie.put("poster", meta.optString("poster", ""));

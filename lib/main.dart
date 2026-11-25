@@ -42,6 +42,59 @@ class _CinemaHomeState extends State<CinemaHome> {
   final selected=ValueNotifier<Movie?>(null);
   final search=TextEditingController();
   final homeScroll=ScrollController();
+  final homeNav=FocusNode(debugLabel:'Home'), searchNav=FocusNode(debugLabel:'Search'),
+    menuNav=FocusNode(debugLabel:'Menu'), heroFocus=FocusNode(debugLabel:'Hero watch');
+  final rowKeys=<String,GlobalKey<CinemaShelfState>>{};
+  final menuAnchor=GlobalKey();
+  List<String> get visibleRows=>[
+    if(widget.history.movies().isNotEmpty)'Continue watching',
+    for(final entry in collections.entries)if(shelves[entry.key]?.isNotEmpty==true)entry.value,
+  ];
+  Duration get motion=>MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:300);
+  void scrollTop(){
+    if(!homeScroll.hasClients)return;
+    if(motion==Duration.zero){homeScroll.jumpTo(0);}else{homeScroll.animateTo(0,duration:motion,curve:Curves.easeOutCubic);}
+  }
+  void revealRow(String name){
+    WidgetsBinding.instance.addPostFrameCallback((_){
+      if(!mounted||searching)return;
+      final ctx=rowKeys[name]?.currentContext;
+      if(ctx==null||!(rowKeys[name]?.currentState?.hasActiveFocus??false))return;
+      Scrollable.ensureVisible(ctx,alignment:0.13,duration:motion,curve:Curves.easeOutCubic);
+    });
+  }
+  void moveRow(String name,bool down){
+    final rows=visibleRows;final i=rows.indexOf(name)+(down?1:-1);
+    if(i<0){focusHero();return;}
+    if(i<rows.length){rowKeys[rows[i]]?.currentState?.focusRemembered();}
+  }
+  void focusHero(){
+    scrollTop();
+    if(heroFocus.context!=null){heroFocus.requestFocus();}
+    else{homeNav.requestFocus();}
+  }
+  KeyEventResult navKeys(FocusNode node,KeyEvent event){
+    if(!engine.tv||event is! KeyDownEvent&&event is! KeyRepeatEvent)return KeyEventResult.ignored;
+    final key=event.logicalKey;
+    if(key==LogicalKeyboardKey.arrowDown&&!searching){
+      focusHero();return KeyEventResult.handled;
+    }
+    if(key==LogicalKeyboardKey.arrowLeft||key==LogicalKeyboardKey.arrowRight){
+      final nodes=[homeNav,searchNav,menuNav];
+      final current=nodes.indexWhere((n)=>n.hasFocus);
+      if(current>=0){nodes[(current+(key==LogicalKeyboardKey.arrowRight?1:-1)).clamp(0,2).toInt()].requestFocus();return KeyEventResult.handled;}
+    }
+    return KeyEventResult.ignored;
+  }
+  KeyEventResult heroKeys(FocusNode node,KeyEvent event){
+    if(!engine.tv||event is! KeyDownEvent&&event is! KeyRepeatEvent)return KeyEventResult.ignored;
+    if(event.logicalKey==LogicalKeyboardKey.arrowUp){homeNav.requestFocus();scrollTop();return KeyEventResult.handled;}
+    if(event.logicalKey==LogicalKeyboardKey.arrowDown){
+      final rows=visibleRows;if(rows.isNotEmpty)rowKeys[rows.first]?.currentState?.focusRemembered();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
   Timer? debounce;int generation=0;bool searching=false;bool loading=true;bool searchBusy=false;List<Movie> results=[];String? searchError;
   NativeEngine get engine=>widget.engine;
   @override void initState(){super.initState();load();}
@@ -80,19 +133,60 @@ class _CinemaHomeState extends State<CinemaHome> {
     await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:const Movie(id:'manual',title:'Media source'),engine:engine,history:widget.history,magnet:value)));
     if(mounted)setState((){});
   }
-  @override void dispose(){debounce?.cancel();search.dispose();homeScroll.dispose();selected.dispose();super.dispose();}
+  @override void dispose(){debounce?.cancel();search.dispose();homeScroll.dispose();selected.dispose();homeNav.dispose();searchNav.dispose();menuNav.dispose();heroFocus.dispose();super.dispose();}
   @override Widget build(BuildContext context){
     final tv=engine.tv;
-    return Scaffold(body:SafeArea(child:Column(children:[
-      Padding(padding:EdgeInsets.symmetric(horizontal:tv?40:16,vertical:10),child:Row(children:[
-        const Wordmark(),const Spacer(),
-        TextButton(onPressed:()=>setState(()=>searching=false),child:Text('Home',style:TextStyle(color:!searching?CinemaColors.accent:CinemaColors.ink))),
-        TextButton(onPressed:()=>setState(()=>searching=true),child:Text('Search',style:TextStyle(color:searching?CinemaColors.accent:CinemaColors.ink))),
-        PopupMenuButton<String>(onSelected:(v)async{if(v=='source'){await manual();}else if(v=='refresh'){await load();}else{try{await engine.checkUpdates();}catch(e){if(context.mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Updates not configured in this development build.')));}}},itemBuilder:(_)=>const [PopupMenuItem(value:'source',child:Text('Open source')),PopupMenuItem(value:'refresh',child:Text('Refresh catalog')),PopupMenuItem(value:'update',child:Text('Check updates'))])
-      ])),
-      Expanded(child:searching?buildSearch(tv):buildHome(tv))
-    ])));
+    final nav=Focus(canRequestFocus:false,onKeyEvent:navKeys,child:Container(
+      decoration:tv?const BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Color(0xF0000000),Color(0xB0000000),Colors.transparent])):null,
+      padding:EdgeInsets.symmetric(horizontal:tv?40:16,vertical:10),
+      child:Stack(alignment:Alignment.center,children:[
+        const Align(alignment:Alignment.centerLeft,child:Wordmark()),
+        Row(mainAxisSize:MainAxisSize.min,children:[
+          navButton('Home',homeNav,!searching,(){setState(()=>searching=false);scrollTop();}),
+          const SizedBox(width:8),
+          navButton('Search',searchNav,searching,()=>setState(()=>searching=true)),
+        ]),
+        Align(alignment:Alignment.centerRight,child:IconButton(key:menuAnchor,focusNode:menuNav,tooltip:'Menu',onPressed:openNavMenu,icon:const Icon(Icons.more_vert)))
+      ])));
+    return Scaffold(body:SafeArea(child:Shortcuts(shortcuts:const {
+      SingleActivator(LogicalKeyboardKey.select):ActivateIntent(),
+      SingleActivator(LogicalKeyboardKey.enter):ActivateIntent(),
+    },child:Stack(children:[
+      if(tv&&!searching)Positioned.fill(child:ambient()),
+      Positioned.fill(child:Column(children:[
+        nav,
+        Expanded(child:searching?buildSearch(tv):buildHome(tv))
+      ]))
+    ]))));
   }
+  Future<void> openNavMenu() async {
+    final anchor=menuAnchor.currentContext?.findRenderObject();
+    final overlay=Navigator.of(context).overlay?.context.findRenderObject();
+    if(anchor is! RenderBox||overlay is! RenderBox)return;
+    final origin=anchor.localToGlobal(Offset.zero,ancestor:overlay);
+    final rect=origin & anchor.size;
+    final v=await showMenu<String>(context:context,
+      position:RelativeRect.fromRect(rect,Offset.zero & overlay.size),
+      items:const [
+        PopupMenuItem(value:'source',child:Text('Open source')),
+        PopupMenuItem(value:'refresh',child:Text('Refresh catalog')),
+        PopupMenuItem(value:'update',child:Text('Check updates')),
+      ]);
+    if(!mounted)return;
+    menuNav.requestFocus();
+    if(v==null)return;
+    if(v=='source'){await manual();}
+    else if(v=='refresh'){await load();}
+    else{
+      try{await engine.checkUpdates();}
+      catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Updates not configured in this development build.')));}
+    }
+  }
+  Widget navButton(String label,FocusNode node,bool active,VoidCallback action)=>TextButton(
+    focusNode:node,onFocusChange:(focused){if(focused&&!searching)scrollTop();},
+    onPressed:action,style:TextButton.styleFrom(backgroundColor:active?const Color(0x33444444):Colors.transparent,
+      foregroundColor:active?CinemaColors.accent:CinemaColors.ink,padding:const EdgeInsets.symmetric(horizontal:18,vertical:12)),
+    child:Text(label));
   Widget buildSearch(bool tv)=>Padding(padding:EdgeInsets.symmetric(horizontal:tv?40:16),child:Column(children:[
     TextField(controller:search,onChanged:query,decoration:const InputDecoration(prefixIcon:Icon(Icons.search),hintText:'Find a movie')),
     const SizedBox(height:16),
@@ -104,26 +198,24 @@ class _CinemaHomeState extends State<CinemaHome> {
   Widget poster(Movie m,bool tv)=>RemoteTile(label:m.title,onPressed:()=>open(m),onFocused:()=>selected.value=m,child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
     Expanded(child:CinemaArt(m.poster)),Padding(padding:const EdgeInsets.all(5),child:Text(m.title,maxLines:1,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?15:12)))
   ]));
-  Widget shelf(String name,List<Movie> movies,bool tv)=>tv?CinemaShelf(key:ValueKey(name),title:name,movies:movies,onHighlight:(m)=>selected.value=m,onOpen:open):Padding(padding:const EdgeInsets.only(bottom:22),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+  Widget shelf(String name,List<Movie> movies,bool tv)=>tv?CinemaShelf(key:rowKeys.putIfAbsent(name,()=>GlobalKey<CinemaShelfState>()),title:name,movies:movies,onHighlight:(m)=>selected.value=m,onOpen:open,onVertical:(down)=>moveRow(name,down),onRowFocus:()=>revealRow(name)):Padding(padding:const EdgeInsets.only(bottom:22),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     Padding(padding:EdgeInsets.symmetric(horizontal:tv?40:16),child:Text(name,style:TextStyle(fontSize:tv?22:19,fontWeight:FontWeight.w700))),
     const SizedBox(height:10),
     SizedBox(height:tv?204:175,child:ListView.builder(scrollDirection:Axis.horizontal,padding:EdgeInsets.symmetric(horizontal:tv?40:16),itemCount:movies.length,itemBuilder:(_,i)=>Padding(padding:const EdgeInsets.only(right:10),child:SizedBox(width:tv?132:112,child:poster(movies[i],tv)))))
   ]));
-  Widget buildHome(bool tv)=>Stack(children:[
-    if(tv) Positioned.fill(child:ValueListenableBuilder<Movie?>(valueListenable:selected,builder:(_,m,__)=>m==null?const SizedBox():Stack(fit:StackFit.expand,children:[
-      Align(alignment:Alignment.topRight,child:SizedBox(width:MediaQuery.sizeOf(context).width*.82,height:MediaQuery.sizeOf(context).height*.72,child:AnimatedSwitcher(duration:MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:240),layoutBuilder:(current,previous)=>Stack(fit:StackFit.expand,children:[...previous,if(current!=null)current]),child:CinemaArt(m.art,key:ValueKey(m.art),cacheWidth:1280)))),
-      const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(colors:[CinemaColors.canvas,Color(0xAA11110F),Colors.transparent],stops:[0,.42,1]))),
-      const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Colors.transparent,CinemaColors.canvas],stops:[.20,.76])))
-    ]))),
-    CustomScrollView(controller:homeScroll,slivers:[
-      SliverToBoxAdapter(child:ValueListenableBuilder<Movie?>(valueListenable:selected,builder:(_,m,__)=>m==null?const SizedBox(height:16):hero(m,tv))),
-      if(loading)const SliverToBoxAdapter(child:LinearProgressIndicator()),
-      if(widget.history.movies().isNotEmpty)SliverToBoxAdapter(child:shelf('Continue watching',widget.history.movies(),tv)),
+  Widget ambient()=>ValueListenableBuilder<Movie?>(valueListenable:selected,builder:(_,m,__)=>m==null?const SizedBox():Stack(fit:StackFit.expand,children:[
+      Align(alignment:Alignment.topRight,child:SizedBox(width:MediaQuery.sizeOf(context).width*.88,height:MediaQuery.sizeOf(context).height*.86,child:AnimatedSwitcher(duration:motion,layoutBuilder:(current,previous)=>Stack(fit:StackFit.expand,children:[...previous,if(current!=null)current]),child:CinemaArt(m.art,key:ValueKey(m.art),cacheWidth:1280)))),
+      const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(colors:[CinemaColors.canvas,Color(0xB011110F),Color(0x5511110F)],stops:[0,.42,1]))),
+      const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Colors.transparent,CinemaColors.canvas],stops:[.25,.96])))
+    ]));
+  Widget buildHome(bool tv)=>SingleChildScrollView(controller:homeScroll,child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+      ValueListenableBuilder<Movie?>(valueListenable:selected,builder:(_,m,__)=>m==null?const SizedBox(height:16):hero(m,tv)),
+      if(loading)const LinearProgressIndicator(),
+      if(widget.history.movies().isNotEmpty)shelf('Continue watching',widget.history.movies(),tv),
       for(final entry in collections.entries)
-        if(shelves[entry.key]?.isNotEmpty==true)SliverToBoxAdapter(child:shelf(entry.value,shelves[entry.key]!,tv))
-        else if(failures.containsKey(entry.key))SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.all(16),child:TextButton(onPressed:load,child:Text('Retry ${entry.value}'))))
-    ])
-  ]);
+        if(shelves[entry.key]?.isNotEmpty==true)shelf(entry.value,shelves[entry.key]!,tv)
+        else if(failures.containsKey(entry.key))Padding(padding:const EdgeInsets.all(16),child:TextButton(onPressed:load,child:Text('Retry ${entry.value}')))
+    ]));
   Widget hero(Movie m,bool tv)=>Stack(children:[
     if(!tv) Positioned.fill(child:Stack(fit:StackFit.expand,children:[
       CinemaArt(m.art,cacheWidth:900),
@@ -135,7 +227,7 @@ class _CinemaHomeState extends State<CinemaHome> {
           Text(m.title,maxLines:2,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?42:32,height:1.05,fontWeight:FontWeight.w800)),
           if(m.year.isNotEmpty)Padding(padding:const EdgeInsets.only(top:8),child:Text(m.year,style:const TextStyle(color:CinemaColors.muted))),
           if(tv)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Text(m.description,maxLines:2,overflow:TextOverflow.ellipsis)),
-          const SizedBox(height:14),FilledButton.icon(onPressed:()=>open(m),icon:const Icon(Icons.play_arrow),label:const Text('Watch'))
+          const SizedBox(height:14),Focus(canRequestFocus:false,onKeyEvent:heroKeys,child:FilledButton.icon(focusNode:heroFocus,onFocusChange:(focused){if(focused&&tv)scrollTop();},onPressed:()=>open(m),icon:const Icon(Icons.play_arrow),label:const Text('Watch')))
         ]))))))
   ]);
 }

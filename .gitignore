@@ -3,9 +3,17 @@
 .packages
 build/
 android/.gradle/
+android/.kotlin/
+.kotlin/
+android/gradlew
+android/gradlew.bat
+android/gradle/wrapper/gradle-wrapper.jar
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+coverage/
 android/local.properties
 android/key.properties
 *.jks
 *.keystore
 .env
 .idea/
+assets/fonts/

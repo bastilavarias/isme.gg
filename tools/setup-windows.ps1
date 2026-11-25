@@ -65,7 +65,7 @@ function Find-CompatibleJdk {
             return (Resolve-Path -LiteralPath $jdkHome).Path
         }
     }
-    throw 'JDK 17 or 21 is required for Gradle 8.13. Install with: winget install --id EclipseAdoptium.Temurin.21.JDK -e ; then rerun, or pass -JdkDir "C:\path\to\jdk-21".'
+    throw 'An installed JDK 17 or 21 is required. Use the official Eclipse Temurin Windows x64 JDK MSI from https://adoptium.net/temurin/releases/?version=21 (no Winget needed), or pass -JdkDir "C:\path\to\jdk-21".'
 }
 
 function Find-AvdSerial {
@@ -93,11 +93,25 @@ try {
         $dirty = @(& $git status --porcelain --untracked-files=no)
         if ($LASTEXITCODE -ne 0) { throw 'Could not inspect Git status.' }
         if ($dirty.Count -gt 0) {
+            Write-Host 'Local tracked changes detected. Git will preserve them if the incoming update does not overlap.' -ForegroundColor Yellow
             $dirty | Write-Host
-            throw 'Tracked local changes found. Commit or stash them deliberately, then rerun. To test your local changes without pulling, use setupwindows.bat -SkipPull.'
         }
-        Invoke-Checked $git @('pull','--ff-only','--no-rebase','--no-autostash','origin','main')
+        $launcherPath = $PSCommandPath
+        $before = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash
+        & $git pull --ff-only --no-rebase --no-autostash origin main
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Git could not fast-forward safely. Review the Git error above. Local changes are not reset or stashed automatically. Resolve the conflict or run setupwindows.bat -SkipPull to use your current checkout.'
+        }
         Invoke-Checked $git @('log','-1','--oneline')
+        $after = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash
+        if ($before -ne $after) {
+            Write-Host 'Launcher updated. Reloading it before the build...' -ForegroundColor Cyan
+            $nextArgs = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$launcherPath,'-SkipPull','-Avd',$Avd)
+            if ($ReuseEmulator) { $nextArgs += '-ReuseEmulator' }
+            if ($JdkDir) { $nextArgs += @('-JdkDir',$JdkDir) }
+            & powershell.exe @nextArgs
+            exit $LASTEXITCODE
+        }
     } else {
         Write-Host '[1/5] Using current local code (pull skipped).'
     }
@@ -112,7 +126,10 @@ try {
     $env:Path = "$(Join-Path $sdk 'platform-tools');$(Join-Path $sdk 'emulator');$env:Path"
     $flutterCandidates = @('C:\flutter\bin\flutter.bat', 'C:\src\flutter\bin\flutter.bat')
     if ($env:FLUTTER_ROOT) { $flutterCandidates += (Join-Path $env:FLUTTER_ROOT 'bin\flutter.bat') }
-    if ($env:USERPROFILE) { $flutterCandidates += (Join-Path $env:USERPROFILE 'flutter\bin\flutter.bat') }
+    if ($env:USERPROFILE) {
+        $flutterCandidates += (Join-Path $env:USERPROFILE 'flutter\bin\flutter.bat')
+        $flutterCandidates += (Join-Path $env:USERPROFILE 'Documents\ChatGPT\isme.gg\dev-sdk\flutter\bin\flutter.bat')
+    }
     $flutter = Find-Tool 'flutter.bat' $flutterCandidates
     $adb = Find-Tool 'adb.exe' @((Join-Path $sdk 'platform-tools\adb.exe'))
     $emulator = Find-Tool 'emulator.exe' @((Join-Path $sdk 'emulator\emulator.exe'))
@@ -134,7 +151,11 @@ try {
         throw "AVD '$Avd' not found. Create it in Android Studio or pass -Avd NAME."
     }
 
-    Write-Host '[3/5] Cold-booting Android TV emulator...' -ForegroundColor Cyan
+    if ($ReuseEmulator) {
+        Write-Host '[3/5] Reusing Android TV emulator when available...' -ForegroundColor Cyan
+    } else {
+        Write-Host '[3/5] Cold-booting Android TV emulator...' -ForegroundColor Cyan
+    }
     $serial = Find-AvdSerial $adb $Avd
     $escaped = [regex]::Escape($Avd)
     function Get-MatchingEmulator {
@@ -193,6 +214,8 @@ try {
         -not (Test-Path 'android\gradle\wrapper\gradle-wrapper.jar')) {
         & (Join-Path $PSScriptRoot 'prepare-windows.ps1')
     }
+    $dart = Join-Path (Split-Path -Parent $flutter) 'dart.bat'
+    Invoke-Checked $dart @('tools/prepare_fonts.dart')
     Invoke-Checked $flutter @('pub','get')
 
     Write-Host '[5/5] Building, installing and launching isme.gg...' -ForegroundColor Cyan

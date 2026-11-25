@@ -39,6 +39,55 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   List<VideoAudioTrack> audioTracks=[];
   final FocusNode playerFocus=FocusNode(debugLabel:'Cinema player');
   final FocusNode playFocus=FocusNode(debugLabel:'Play or pause');
+  final FocusNode backFocus=FocusNode(debugLabel:'Back'), debugFocus=FocusNode(debugLabel:'Diagnostics'),
+    seekFocus=FocusNode(debugLabel:'Progress bar'), rewindFocus=FocusNode(debugLabel:'Rewind'),
+    forwardFocus=FocusNode(debugLabel:'Forward'), ccFocus=FocusNode(debugLabel:'Subtitles'),
+    audioFocus=FocusNode(debugLabel:'Audio'), sourceFocus=FocusNode(debugLabel:'Source');
+  FocusNode? lastControl, lastBottom;
+  List<FocusNode> get bottomNodes=>[rewindFocus,playFocus,forwardFocus,ccFocus,audioFocus,if(sources.length>1)sourceFocus];
+  List<FocusNode> get topNodes=>[backFocus,if(kDebugMode)debugFocus];
+  int get subtitleSize=>(widget.history.prefs.getInt('isme-subtitle-size')??1).clamp(0,3).toInt();
+  static const subtitleSizes=['Small','Medium','Large','Extra large'];
+  double get captionFontSize=>(widget.engine.tv?24.0:17.0)*[.8,1.0,1.25,1.5][subtitleSize];
+  Duration get motion=>MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:220);
+  String get loadingCaption {
+    if(leaving)return 'Closing playback…';
+    if(phase=='Recovering playback')return 'Retrying playback…';
+    if(phase=='Validating stream')return 'Checking playback…';
+    if(phase=='Initializing player')return 'Starting playback…';
+    if(phase=='Stopping')return 'Closing playback…';
+    switch(nativeState['status']){
+      case 'resolving':return 'Finding your movie…';
+      case 'loading':return 'Establishing a connection…';
+      case 'buffering':return 'Getting your movie ready…';
+      default:return recovery.total>1?'Retrying playback…':'Finding your movie…';
+    }
+  }
+  void focusControl(FocusNode node){
+    if(node.context!=null&&node.canRequestFocus)node.requestFocus();
+  }
+  bool moveControl(LogicalKeyboardKey key){
+    final left=key==LogicalKeyboardKey.arrowLeft,right=key==LogicalKeyboardKey.arrowRight,
+      up=key==LogicalKeyboardKey.arrowUp,down=key==LogicalKeyboardKey.arrowDown;
+    if(!left&&!right&&!up&&!down)return false;
+    final top=topNodes,bottom=bottomNodes;
+    final t=top.indexWhere((n)=>n.hasFocus),b=bottom.indexWhere((n)=>n.hasFocus);
+    if(seekFocus.hasFocus){
+      if(left||right){unawaited(seek(right?10:-10));}
+      else if(up){focusControl(backFocus);}
+      else{focusControl(bottom.contains(lastBottom)?lastBottom!:playFocus);}
+    }else if(t>=0){
+      if(left||right){focusControl(top[(t+(right?1:-1)).clamp(0,top.length-1).toInt()]);}
+      else if(down&&player!=null){focusControl(seekFocus);}
+    }else if(b>=0){
+      if(left||right){focusControl(bottom[(b+(right?1:-1)).clamp(0,bottom.length-1).toInt()]);}
+      else if(up){focusControl(seekFocus);}
+    }else{
+      if(player==null)return false;
+      focusControl(playFocus);
+    }
+    return true;
+  }
   String get subtitleLanguage=>widget.history.prefs.getString('isme-subtitle-language')??'eng';
   @override void initState(){
     super.initState();WidgetsBinding.instance.addObserver(this);
@@ -71,6 +120,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     final n=++generation;
     cancelAttempt();subtitleRevision++;audioRevision++;recommendedAudioId=null;audioTracks=[];watchdog?.cancel();saveTimer?.cancel();hide?.cancel();
     if(resetBudget){recovery.reset();lastFault='none';wantsPlayback=true;}
+    nativeState={};
     setState((){busy=true;error=null;progress=0;source=index;controls=true;phase='Opening media';});
     if(old!=null){
       try{await widget.engine.stop();}catch(_){}
@@ -94,7 +144,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     final overall=DateTime.now().add(const Duration(minutes:4));
     while(active(n)){
       recovery.record(candidate);
-      setState((){source=candidate;phase='Preparing media';progress=0;});
+      setState((){source=candidate;phase=recovery.total>1?'Recovering playback':'Preparing media';progress=0;nativeState={};});
       try{
         await attempt(n,candidate,cancel,overall);
         return;
@@ -154,7 +204,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
           return;
         }finally{if(!adopted)await c.dispose();}
       }
-      setState(()=>progress=((state['progress'] as num?)?.round()??0).clamp(0,100).toInt());
+      setState((){phase='Preparing media';progress=((state['progress'] as num?)?.round()??0).clamp(0,100).toInt();});
       await cancellable(Future<void>.delayed(const Duration(milliseconds:850)),cancel);
     }
   }
@@ -216,7 +266,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(reveal)setState(()=>controls=true);
     if((reveal||focus)&&player!=null&&!settingsOpen){
       WidgetsBinding.instance.addPostFrameCallback((_){
-        if(mounted&&!closed&&controls&&!settingsOpen&&playFocus.context!=null)playFocus.requestFocus();
+        if(mounted&&!closed&&controls&&!settingsOpen){final target=lastControl;focusControl(target!=null&&target.context!=null&&target.canRequestFocus?target:playFocus);}
       });
     }
     armControlsTimer();
@@ -266,7 +316,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         showControls(focus:true);return KeyEventResult.handled;
       }
     }
-    if(controls)armControlsTimer();
+    if(controls){armControlsTimer();if(widget.engine.tv&&moveControl(key))return KeyEventResult.handled;}
     return KeyEventResult.ignored;
   }
   Future<void> setPlaying(bool value) async{
@@ -327,7 +377,8 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     try {
       final choice=await settingsDialog<Map<String,dynamic>>((ctx)=>SimpleDialog(
         title:const Text('Subtitles'),children:[
-          TextButton(autofocus:true,onPressed:()=>Navigator.pop(ctx,{'id':-1,'lang':'off'}),child:Text(captionId==null?'Off (no active track)':'Off')),
+          TextButton(autofocus:true,onPressed:()=>Navigator.pop(ctx,{'id':-2}),child:Text('Subtitle size: ${subtitleSizes[subtitleSize]}')),
+          TextButton(onPressed:()=>Navigator.pop(ctx,{'id':-1,'lang':'off'}),child:Text(captionId==null?'Off (no active track)':'Off')),
           FutureBuilder<List<Map<String,dynamic>>>(future:tracksFuture,builder:(_,snapshot){
             if(snapshot.hasError)return const Padding(padding:EdgeInsets.all(16),child:Text('Subtitles unavailable'));
             if(!snapshot.hasData)return const Padding(padding:EdgeInsets.all(16),child:LinearProgressIndicator());
@@ -341,8 +392,9 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
           })
         ]));
       if(choice==null||!samePlayer(c,n))return;
-      final revision=++subtitleRevision;
       final id=choice['id'] as int;
+      if(id==-2){await chooseSubtitleSize();return;}
+      final revision=++subtitleRevision;
       if(id<0){
         await c.setClosedCaptionFile(null);
         if(samePlayer(c,n)&&revision==subtitleRevision){
@@ -360,6 +412,16 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       }
     }catch(_){if(samePlayer(c,n))notice('Subtitles unavailable.');}
     finally{if(samePlayer(c,n))showControls();}
+  }
+  Future<void> chooseSubtitleSize() async {
+    final value=await settingsDialog<int>((ctx)=>SimpleDialog(title:const Text('Subtitle size'),children:[
+      for(var i=0;i<subtitleSizes.length;i++)
+        TextButton(autofocus:i==subtitleSize,onPressed:()=>Navigator.pop(ctx,i),
+          child:Text(subtitleSizes[i]+(i==subtitleSize?' (selected)':''),style:TextStyle(fontSize:16.0+i*3))),
+    ]));
+    if(value==null||!mounted||closed)return;
+    await widget.history.prefs.setInt('isme-subtitle-size',value);
+    if(mounted&&!closed)setState((){});
   }
   Future<void> applyAudioPreference(VideoPlayerController c,int n) async{
     if(!samePlayer(c,n))return;
@@ -438,7 +500,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(leaving)return;setState(()=>leaving=true);await shutdown();
     if(mounted)Navigator.of(context).pop();
   }
-  @override void dispose(){HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());playerFocus.dispose();playFocus.dispose();super.dispose();}
+  @override void dispose(){HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());playerFocus.dispose();for(final node in [playFocus,backFocus,debugFocus,seekFocus,rewindFocus,forwardFocus,ccFocus,audioFocus,sourceFocus]){node.dispose();}super.dispose();}
   String clock(Duration d){final h=d.inHours,m=d.inMinutes.remainder(60).toString().padLeft(2,'0'),s=d.inSeconds.remainder(60).toString().padLeft(2,'0');return h>0?'$h:$m:$s':'$m:$s';}
   Widget diagnosticsPanel(VideoPlayerValue? v){
     final position=v?.position??resume;
@@ -461,6 +523,78 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         child:Text('${row.key}: ${row.value}',style:const TextStyle(fontSize:12)))
     ]);
   }
+  Widget controlButton(FocusNode node,String label,IconData icon,VoidCallback action,{bool compact=false}){
+    return Focus(canRequestFocus:false,onFocusChange:(value){
+      if(value){lastControl=node;if(bottomNodes.contains(node))lastBottom=node;armControlsTimer();}
+    },child:IconButton(focusNode:node,tooltip:label,onPressed:action,icon:Icon(icon),
+      iconSize:widget.engine.tv?28:23,
+      style:ButtonStyle(
+        minimumSize:WidgetStatePropertyAll(Size(widget.engine.tv&&!compact?54:44,widget.engine.tv&&!compact?54:44)),
+        backgroundColor:WidgetStateProperty.resolveWith((states)=>states.contains(WidgetState.focused)?const Color(0x55FFFFFF):Colors.transparent),
+        foregroundColor:WidgetStateProperty.resolveWith((states)=>states.contains(WidgetState.focused)?CinemaColors.accent:CinemaColors.ink),
+      )));
+  }
+  Widget controlOverlay(Widget child,{required bool top}){
+    final visible=controls&&!leaving;
+    return ExcludeFocus(excluding:!visible,child:IgnorePointer(ignoring:!visible,
+      child:AnimatedSlide(duration:motion,curve:Curves.easeOutCubic,
+        offset:visible?Offset.zero:Offset(0,top?-.12:.12),
+        child:AnimatedOpacity(duration:motion,opacity:visible?1:0,child:child))));
+  }
+  Widget loadingView({required String caption,String? percentage}){
+    return Center(child:Column(mainAxisSize:MainAxisSize.min,children:[
+      const CircularProgressIndicator(),const SizedBox(height:18),
+      if(percentage!=null)Text(percentage,style:const TextStyle(fontSize:22,fontWeight:FontWeight.w600)),
+      const SizedBox(height:8),
+      AnimatedSwitcher(duration:motion,child:Text(caption,key:ValueKey(caption),
+        textAlign:TextAlign.center,style:const TextStyle(fontSize:14,color:CinemaColors.muted))),
+    ]));
+  }
+  Widget progressBar(VideoPlayerController c,VideoPlayerValue v){
+    final tv=widget.engine.tv;
+    final max=v.duration.inMilliseconds>0?v.duration.inMilliseconds.toDouble():1.0;
+    final slider=Slider(value:v.position.inMilliseconds.clamp(0,max).toDouble(),max:max,
+      onChanged:(n){lastAdvance=DateTime.now();unawaited(c.seekTo(Duration(milliseconds:n.round())));showControls();});
+    if(!tv)return slider;
+    // A TV's slider must not consume up/down as value-changing keys.
+    // Own its focus explicitly and keep the underlying touch slider usable.
+    return Focus(focusNode:seekFocus,onFocusChange:(focused){
+      if(focused){lastControl=seekFocus;armControlsTimer();}
+      if(mounted)setState((){});
+    },onKeyEvent:(_,event){
+      if(event is KeyDownEvent||event is KeyRepeatEvent){
+        final key=event.logicalKey;
+        if(key==LogicalKeyboardKey.select||key==LogicalKeyboardKey.enter)return KeyEventResult.handled;
+        return handleRemote(event);
+      }
+      return KeyEventResult.ignored;
+    },child:AnimatedContainer(duration:motion,
+      decoration:BoxDecoration(borderRadius:BorderRadius.circular(24),
+        color:seekFocus.hasFocus?const Color(0x22FFFFFF):Colors.transparent),
+      child:ExcludeFocus(child:slider)));
+  }
+  Widget playbackControls(VideoPlayerController c,VideoPlayerValue v){
+    final tv=widget.engine.tv;
+    return controlOverlay(Container(
+      decoration:const BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,
+        colors:[Colors.transparent,Color(0xCC000000),CinemaColors.black],stops:[0,.55,1])),
+      padding:EdgeInsets.fromLTRB(tv?32:12,24,tv?32:12,tv?16:8),
+      child:Column(mainAxisSize:MainAxisSize.min,children:[
+        Row(children:[
+          Text(clock(v.position),style:const TextStyle(fontSize:13)),
+          Expanded(child:progressBar(c,v)),
+          Text(clock(v.duration),style:const TextStyle(fontSize:13)),
+        ]),
+        Wrap(alignment:WrapAlignment.center,spacing:tv?12:4,children:[
+          controlButton(rewindFocus,'Back 10 seconds',Icons.replay_10,()=>seek(-10)),
+          controlButton(playFocus,v.isPlaying?'Pause':'Play',v.isPlaying?Icons.pause:Icons.play_arrow,toggle),
+          controlButton(forwardFocus,'Forward 10 seconds',Icons.forward_10,()=>seek(10)),
+          controlButton(ccFocus,'Subtitles',Icons.closed_caption,captions),
+          controlButton(audioFocus,'Audio tracks',Icons.audiotrack,chooseAudio),
+          if(sources.length>1)controlButton(sourceFocus,'Playback source',Icons.tune,chooseSource),
+        ]),
+      ])),top:false);
+  }
   @override Widget build(BuildContext context){
     final c=player;
     return PopScope(canPop:leaving,onPopInvokedWithResult:(didPop,_) {if(!didPop)unawaited(leave());},
@@ -468,30 +602,30 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       focusNode:playerFocus,autofocus:true,onKeyEvent:(_,event)=>handleRemote(event),
       child:Shortcuts(shortcuts:const {SingleActivator(LogicalKeyboardKey.select):ActivateIntent(),SingleActivator(LogicalKeyboardKey.enter):ActivateIntent()},child:Stack(fit:StackFit.expand,children:[
         if(c!=null&&!leaving)GestureDetector(onTap:showControls,child:Center(child:AspectRatio(aspectRatio:c.value.aspectRatio,child:VideoPlayer(c)))),
-        if(busy||leaving)Center(child:Column(mainAxisSize:MainAxisSize.min,children:[const CircularProgressIndicator(),const SizedBox(height:18),Text(leaving?'Closing…':'$progress%',style:const TextStyle(fontSize:22))])),
+        if(busy||leaving)loadingView(caption:loadingCaption,percentage:leaving?null:'$progress%'),
         if(error!=null&&!leaving)Center(child:Padding(padding:const EdgeInsets.all(32),child:Column(mainAxisSize:MainAxisSize.min,children:[
           Text(error!,textAlign:TextAlign.center),const SizedBox(height:16),FilledButton(autofocus:true,onPressed:()=>start(index:source),child:const Text('Retry')),
           if(sources.length>1)TextButton(onPressed:chooseSource,child:const Text('Other source'))
         ]))),
         if(c!=null&&!leaving)ValueListenableBuilder<VideoPlayerValue>(valueListenable:c,builder:(_,v,__)=>Stack(children:[
-          if(v.hasError)const Center(child:CircularProgressIndicator()),
-          if(v.isBuffering&&!v.hasError)const Center(child:CircularProgressIndicator()),
-          if(v.caption.text.isNotEmpty)Align(alignment:controls?const Alignment(0,.45):const Alignment(0,.84),child:Container(color:const Color(0xCC000000),padding:const EdgeInsets.symmetric(horizontal:10,vertical:5),child:Text(v.caption.text,textAlign:TextAlign.center,style:TextStyle(fontSize:widget.engine.tv?24:17)))),
-          if(controls)Positioned(left:0,right:0,bottom:0,child:Container(
-            decoration:const BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Colors.transparent,CinemaColors.black])),
-            padding:EdgeInsets.all(widget.engine.tv?28:12),child:Column(mainAxisSize:MainAxisSize.min,children:[
-              Row(children:[Text(clock(v.position)),Expanded(child:Slider(value:v.position.inMilliseconds.clamp(0,v.duration.inMilliseconds).toDouble(),max:v.duration.inMilliseconds>0?v.duration.inMilliseconds.toDouble():1,onChanged:(n){lastAdvance=DateTime.now();c.seekTo(Duration(milliseconds:n.round()));showControls();})),Text(clock(v.duration))]),
-              Wrap(alignment:WrapAlignment.center,spacing:8,children:[
-                IconButton(tooltip:'Back 10 seconds',onPressed:()=>seek(-10),icon:const Icon(Icons.replay_10)),
-                IconButton(focusNode:playFocus,tooltip:v.isPlaying?'Pause':'Play',onPressed:toggle,icon:Icon(v.isPlaying?Icons.pause:Icons.play_arrow)),
-                IconButton(tooltip:'Forward 10 seconds',onPressed:()=>seek(10),icon:const Icon(Icons.forward_10)),
-                IconButton(tooltip:'Subtitles',onPressed:captions,icon:const Icon(Icons.closed_caption)),
-                IconButton(tooltip:'Audio tracks',onPressed:chooseAudio,icon:const Icon(Icons.audiotrack)),
-                if(sources.length>1)IconButton(tooltip:'Playback source',onPressed:chooseSource,icon:const Icon(Icons.tune))
-              ])
-            ])))
+          if(v.hasError)loadingView(caption:'Checking playback…'),
+          if(v.isBuffering&&!v.hasError)loadingView(caption:'Buffering playback…'),
+          if(v.caption.text.isNotEmpty)AnimatedAlign(duration:motion,curve:Curves.easeOutCubic,
+            alignment:controls?const Alignment(0,.34):const Alignment(0,.84),
+            child:ConstrainedBox(constraints:BoxConstraints(maxWidth:MediaQuery.sizeOf(context).width*.88),
+              child:Container(color:const Color(0xCC000000),padding:const EdgeInsets.symmetric(horizontal:10,vertical:5),
+                child:Text(v.caption.text,textAlign:TextAlign.center,style:TextStyle(fontSize:captionFontSize,height:1.25))))),
+          Positioned(left:0,right:0,bottom:0,child:playbackControls(c,v)),
         ])),
-        if(controls&&!leaving)Positioned(left:12,top:8,right:12,child:Row(children:[IconButton(tooltip:'Back',onPressed:leave,icon:const Icon(Icons.arrow_back)),Expanded(child:Text(widget.movie.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:20))),if(kDebugMode)IconButton(tooltip:'Playback diagnostics',onPressed:showDiagnostics,icon:const Icon(Icons.bug_report_outlined))])),
+        if(!leaving)Positioned(left:0,top:0,right:0,child:controlOverlay(Container(
+          decoration:const BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,
+            colors:[Color(0xDD000000),Colors.transparent])),
+          padding:EdgeInsets.fromLTRB(widget.engine.tv?24:8,8,widget.engine.tv?24:8,22),
+          child:Row(children:[
+            controlButton(backFocus,'Back',Icons.arrow_back,leave,compact:true),
+            Expanded(child:Text(widget.movie.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:20,fontWeight:FontWeight.w600))),
+            if(kDebugMode)controlButton(debugFocus,'Playback diagnostics',Icons.bug_report_outlined,showDiagnostics,compact:true),
+          ])),top:true)),
         if(kDebugMode&&diagnostics&&!leaving)Positioned(top:64,right:16,child:IgnorePointer(child:Container(width:260,padding:const EdgeInsets.all(12),color:const Color(0xE611110F),child:c==null?diagnosticsPanel(null):ValueListenableBuilder<VideoPlayerValue>(valueListenable:c,builder:(_,v,__)=>diagnosticsPanel(v)))))
       ]))))));
   }

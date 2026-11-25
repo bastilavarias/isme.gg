@@ -5,13 +5,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class Movie {
   final String id, title, description, poster, backdrop;
-  final String year;
-  const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = ''});
+  final String year, genre, runtime, rating;
+  const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = '', this.genre = '', this.runtime = '', this.rating = ''});
+  static String _field(dynamic value) => value == null ? '' : value.toString().trim();
+  static String _genre(dynamic value) => value is List ? value.take(2).map(_field).where((s)=>s.isNotEmpty).join(', ') : _field(value);
+  String get metadata => ['Movie',genre,year,runtime,rating].where((s)=>s.isNotEmpty).join(' · ');
   factory Movie.fromJson(Map<String, dynamic> j) => Movie(
     id: j['id']?.toString() ?? '', title: j['title']?.toString() ?? '',
     description: j['description']?.toString() ?? '', poster: j['poster']?.toString() ?? '',
-    backdrop: j['backdrop']?.toString() ?? '', year: j['year']?.toString() ?? '');
-  Map<String, dynamic> toJson() => {'id':id,'title':title,'description':description,'poster':poster,'backdrop':backdrop,'year':year};
+    backdrop: _field(j['backdrop']), year: _field(j['year']), genre: _genre(j['genres']??j['genre']), runtime: _field(j['runtime']), rating: _field(j['ratingLabel']));
+  Map<String, dynamic> toJson() => {'id':id,'title':title,'description':description,'poster':poster,'backdrop':backdrop,'year':year,'genre':genre,'runtime':runtime,'ratingLabel':rating};
   String get art => backdrop.isNotEmpty ? backdrop : poster;
 }
 class NativeEngine {
