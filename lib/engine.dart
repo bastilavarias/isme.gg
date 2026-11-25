@@ -60,6 +60,7 @@ class NativeEngine {
   late final Uri origin;
   late final String token;
   bool tv = false;
+  String appVersion='';
   String providerCountry='PH';
   String _providerToken='';
   final providerRevision=ValueNotifier<int>(0);
@@ -121,6 +122,7 @@ class NativeEngine {
     origin = Uri.parse(result['origin'] as String);
     if (origin.host != '127.0.0.1' || origin.scheme != 'http') throw StateError('Invalid local origin');
     token = result['token'] as String; tv = result['tv'] == true;
+    appVersion=result['versionName']?.toString()??'';
   }
   Uri url(String path, [Map<String,String>? query]) => origin.resolve(path).replace(queryParameters: query);
   Future<Map<String,dynamic>> json(String path, {Map<String,String>? query, Map<String,dynamic>? body}) async {
@@ -224,6 +226,14 @@ class NativeEngine {
     return utf8.decode(res.bodyBytes);
   }
   Future<void> checkUpdates() => channel.invokeMethod<void>('checkUpdates');
+  Future<void> setSupportUiActive(bool active) async {
+    try{await channel.invokeMethod<void>('setSupportUiActive',{'active':active});}catch(_){}
+  }
+  Future<void> openIssueReport()=>channel.invokeMethod<void>('openIssueReport');
+  Future<bool> clearLocalData() async=>await channel.invokeMethod<bool>('clearLocalData')??false;
+  Future<void> setPlaybackActive(bool active) async {
+    try{await channel.invokeMethod<void>('setPlaybackActive',{'active':active});}catch(_){}
+  }
   void dispose(){_disposed=true;_providerMemo.clear();_client.close();providerRevision.dispose();}
 }
 class History {

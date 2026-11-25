@@ -259,6 +259,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   String get subtitleLanguage=>widget.history.prefs.getString('isme-subtitle-language')??'eng';
   @override void initState(){
     super.initState();WidgetsBinding.instance.addObserver(this);
+    unawaited(widget.engine.setPlaybackActive(true));
     _movie=widget.movie;
     resume=widget.magnet.isEmpty?widget.history.position(_movie):Duration.zero;
     HardwareKeyboard.instance.addHandler(fallbackRemote);
@@ -685,7 +686,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(leaving)return;setState(()=>leaving=true);await shutdown();await _restoreMobileDisplay();
     if(mounted)Navigator.of(context).pop();
   }
-  @override void dispose(){HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());unawaited(_restoreMobileDisplay());playerFocus.dispose();for(final node in [playFocus,backFocus,debugFocus,seekFocus,rewindFocus,forwardFocus,ccFocus,audioFocus,sourceFocus,_nextFocus,_creditsFocus]){node.dispose();}super.dispose();}
+  @override void dispose(){unawaited(widget.engine.setPlaybackActive(false));HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());unawaited(_restoreMobileDisplay());playerFocus.dispose();for(final node in [playFocus,backFocus,debugFocus,seekFocus,rewindFocus,forwardFocus,ccFocus,audioFocus,sourceFocus,_nextFocus,_creditsFocus]){node.dispose();}super.dispose();}
   String clock(Duration d){final h=d.inHours,m=d.inMinutes.remainder(60).toString().padLeft(2,'0'),s=d.inSeconds.remainder(60).toString().padLeft(2,'0');return h>0?'$h:$m:$s':'$m:$s';}
   Widget diagnosticsPanel(VideoPlayerValue? v){
     final position=v?.position??resume;

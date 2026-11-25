@@ -1,4 +1,10 @@
 <resources>
     <style name="LaunchTheme" parent="@android:style/Theme.Material.NoActionBar"><item name="android:windowBackground">#11110F</item><item name="android:windowActionModeOverlay">true</item></style>
     <style name="NormalTheme" parent="@android:style/Theme.Material.NoActionBar"><item name="android:windowBackground">#11110F</item></style>
+    <style name="UpdateDialogTheme" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#F3A369</item>
+        <item name="android:colorBackground">#24211F</item>
+        <item name="android:textColorPrimary">#F5F1EB</item>
+        <item name="android:textColorSecondary">#B7AFA7</item>
+    </style>
 </resources>

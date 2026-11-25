@@ -1,11 +1,12 @@
 package gg.isme.tv;
 
+import android.app.ActivityManager;
+import android.content.Intent;
+import android.net.Uri;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.os.Bundle;
 import android.view.View;
-import android.app.AlertDialog;
-import android.widget.Toast;
 import java.util.HashMap;
 import java.util.Map;
 import io.flutter.embedding.android.FlutterActivity;
@@ -14,7 +15,7 @@ import io.flutter.plugin.common.MethodChannel;
 
 public final class MainActivity extends FlutterActivity {
     private LocalCinemaServer cinema;
-    private ReleaseUpdater updater;
+    private UpdateFlow updater;
     private boolean tv;
     @Override protected void onCreate(Bundle state) {
         tv = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_TYPE_MASK)
@@ -25,7 +26,7 @@ public final class MainActivity extends FlutterActivity {
             getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         }
-        updater = new ReleaseUpdater(this);
+        updater = new UpdateFlow(this);
     }
     @Override public void configureFlutterEngine(FlutterEngine engine) {
         super.configureFlutterEngine(engine);
@@ -36,6 +37,7 @@ public final class MainActivity extends FlutterActivity {
                         if (cinema == null) cinema = new LocalCinemaServer(this, false);
                         Map<String,Object> info = new HashMap<>();
                         info.put("origin", cinema.url()); info.put("token", cinema.token()); info.put("tv", tv);
+                        info.put("versionName", BuildConfig.VERSION_NAME);
                         result.success(info);
                     } catch (Exception e) { result.error("ENGINE", "Could not start local playback engine", null); }
                 } else if ("readMetadataCredential".equals(call.method)) {
@@ -56,29 +58,34 @@ public final class MainActivity extends FlutterActivity {
                     }
                     result.success(data);
                 } else if ("checkUpdates".equals(call.method)) {
-                    if (BuildConfig.RELEASE_REPO.isEmpty()) {
-                        result.error("NOT_CONFIGURED", "Release repository not configured", null);
-                    } else { checkUpdates(); result.success(null); }
+                    if (updater == null || !updater.configured()) {
+                        result.error("NOT_CONFIGURED", "Updates are disabled in this build", null);
+                    } else { updater.check(true); result.success(null); }
+                } else if ("setSupportUiActive".equals(call.method)) {
+                    if (updater != null) updater.supportUi(Boolean.TRUE.equals(call.argument("active")));
+                    result.success(null);
+                } else if ("openIssueReport".equals(call.method)) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/bastilavarias/isme.gg/issues/new")));
+                        result.success(null);
+                    } catch (Exception e) { result.error("BROWSER", "No browser available", null); }
+                } else if ("clearLocalData".equals(call.method)) {
+                    // Use Android's own application-data reset, so open databases, native
+                    // workers and Flutter preference caches cannot race a partial deletion.
+                    // Android terminates this app; the user can reopen to a fresh Home.
+                    try {
+                        ActivityManager manager = (ActivityManager)getSystemService(ACTIVITY_SERVICE);
+                        boolean accepted = manager != null && manager.clearApplicationUserData();
+                        result.success(accepted);
+                    } catch (Exception e) { result.error("RESET", "Could not clear app data", null); }
+                } else if ("setPlaybackActive".equals(call.method)) {
+                    if (updater != null) updater.playback(Boolean.TRUE.equals(call.argument("active")));
+                    result.success(null);
                 } else { result.notImplemented(); }
             });
     }
-    private void checkUpdates() {
-        if (updater == null) return;
-        updater.check(release -> {
-            if (isFinishing() || isDestroyed()) return;
-            new AlertDialog.Builder(this).setTitle("isme.gg update available")
-                .setMessage("Version " + release.version)
-                .setPositiveButton("Download", (d,w) -> updater.download(release, new ReleaseUpdater.DownloadListener() {
-                    public void ready() {
-                        if (!isFinishing() && !isDestroyed()) new AlertDialog.Builder(MainActivity.this)
-                            .setTitle("Install verified update?").setPositiveButton("Install", (a,b) -> updater.install())
-                            .setNegativeButton("Later", null).show();
-                    }
-                    public void error(String message) { Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show(); }
-                })).setNegativeButton("Later", null).show();
-        });
-    }
-    @Override protected void onResume() { super.onResume(); if (updater != null) updater.resumePendingInstall(); }
+    @Override protected void onResume() { super.onResume(); if (updater != null) updater.resume(); }
+    @Override protected void onPause() { if (updater != null) updater.pause(); super.onPause(); }
     @Override protected void onDestroy() {
         if (updater != null) updater.close();
         if (cinema != null) cinema.close();

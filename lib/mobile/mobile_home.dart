@@ -4,6 +4,7 @@ import '../design.dart';
 import '../engine.dart';
 import '../platform_rail.dart';
 import '../player.dart';
+import '../support_menu.dart';
 import 'mobile_details.dart';
 import 'mobile_library.dart';
 import 'mobile_widgets.dart';
@@ -229,20 +230,7 @@ class _MobileHomeState extends State<MobileHome>{
     await loadDirectory(refresh:true);
     if(mounted&&!filtered)await load(refresh:true);
   }
-  void settings(){
-    showModalBottomSheet<void>(context:context,showDragHandle:true,builder:(ctx)=>SafeArea(child:Column(mainAxisSize:MainAxisSize.min,children:[
-      const ListTile(title:Text('Settings',style:TextStyle(fontSize:21,fontWeight:FontWeight.w700))),
-      ListTile(leading:const Icon(Icons.public),title:const Text('Streaming availability'),subtitle:Text(engine.providerCountry),onTap:(){Navigator.pop(ctx);metadataSettings();}),
-      StatefulBuilder(builder:(ctx,update)=>SwitchListTile(secondary:const Icon(Icons.skip_next),title:const Text('Autoplay next episode'),
-        value:widget.history.prefs.getBool('isme-autoplay-next')??true,onChanged:(v)async{await widget.history.prefs.setBool('isme-autoplay-next',v);if(ctx.mounted)update((){});})),
-      ListTile(leading:const Icon(Icons.refresh),title:const Text('Refresh catalogs'),onTap:(){Navigator.pop(ctx);refresh();}),
-      ListTile(leading:const Icon(Icons.system_update),title:const Text('Check for updates'),onTap:()async{
-        Navigator.pop(ctx);
-        try{await engine.checkUpdates();}catch(_){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Updates are not configured for this build.')));}
-      }),
-      const Padding(padding:EdgeInsets.all(16),child:Text('Metadata and artwork: TMDB · Availability: JustWatch',style:TextStyle(fontSize:11,color:CinemaColors.muted))),
-    ])));
-  }
+  Future<void> settings()=>openSupportMenu(context,engine,()=>showSupportSheet(context,engine));
   Widget chips(List<String> labels,String selected,ValueChanged<String> onChanged)=>SingleChildScrollView(scrollDirection:Axis.horizontal,
     padding:const EdgeInsets.symmetric(horizontal:16),child:Row(children:[
       for(final label in labels)Padding(padding:const EdgeInsets.only(right:6),child:ChoiceChip(label:Text(label),selected:label==selected,

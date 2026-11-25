@@ -1,0 +1,10 @@
+# Support and local-data reset
+Both shells expose exactly Report a problem, Clear local data, a divider, and Check updates with the installed version (from native BuildConfig). TV uses its anchored menu; mobile uses a bottom sheet. Previous menu-only controls are removed; existing autoplay/catalog logic and the in-context platform metadata setup remain.
+
+The QR is a precomputed offline matrix for https://github.com/bastilavarias/isme.gg/issues/new, with four-module quiet zone. Phone also opens the fixed URL via Android. No report data or device diagnostics are submitted automatically.
+
+Clear local data is deliberately an Android app-data reset using ActivityManager.clearApplicationUserData(), only after explicit confirmation. Cancel has initial focus. This closes the current app; reopen manually for a clean Home. The installed APK and identity remain unchanged. Android clears app-private storage, preferences, cache and may reset granted permissions. No user media or other apps are targeted. The OS performs deletion rather than racing live database or cache writes. Test this only on a disposable emulator or backed-up test device.
+
+Run flutter analyze and flutter test on Windows; include test/support_menu_test.dart. Test TV remote select, cancel and Back; mobile touch and landscape; QR scan from actual TV; browser fallback; check version from the actual package; verify cancellation does not clear history. On a disposable emulator populate history, credentials, SQLite and temporary caches, confirm reset, reopen and verify defaults. Do not reset a live user installation without confirmation.
+
+Automatic update discovery runs for configured release builds at startup, on foreground return and periodically during an open session. The foreground timer is lightweight and network calls are throttled. Playback and support UI suppress native prompts; no check service runs when the app is closed. Debug builds intentionally disable release updates. Signed old-to-new testing remains pending.

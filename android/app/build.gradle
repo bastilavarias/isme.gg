@@ -3,6 +3,18 @@ plugins {
     id "org.jetbrains.kotlin.android"
     id "dev.flutter.flutter-gradle-plugin"
 }
+// Release identity is permanent. Never fall back to the debug signing key.
+def releaseKeys = new Properties()
+def releaseKeysFile = rootProject.file("key.properties")
+if (releaseKeysFile.exists()) {
+    releaseKeysFile.withInputStream { releaseKeys.load(it) }
+}
+def releaseStore = System.getenv("ISME_KEYSTORE_PATH") ?: releaseKeys.getProperty("storeFile")
+def releaseStorePassword = System.getenv("ISME_KEYSTORE_PASSWORD") ?: releaseKeys.getProperty("storePassword")
+def releaseAlias = System.getenv("ISME_KEY_ALIAS") ?: releaseKeys.getProperty("keyAlias")
+def releaseKeyPassword = System.getenv("ISME_KEY_PASSWORD") ?: releaseKeys.getProperty("keyPassword")
+def releaseSigningReady = [releaseStore, releaseStorePassword, releaseAlias, releaseKeyPassword].every { it }
+
 android {
     namespace "gg.isme.tv"
     compileSdk 36
@@ -17,8 +29,22 @@ android {
         buildConfigField "String", "RELEASE_REPO", '""'
     }
     buildFeatures { buildConfig true }
+    signingConfigs {
+        if (releaseSigningReady) {
+            release {
+                storeFile rootProject.file(releaseStore)
+                storePassword releaseStorePassword
+                keyAlias releaseAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         debug { applicationIdSuffix ".debug" }
+        release {
+            buildConfigField "String", "RELEASE_REPO", '"bastilavarias/isme.gg"'
+            if (releaseSigningReady) signingConfig signingConfigs.release
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -26,6 +52,15 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     packaging { resources.excludes += ["/META-INF/{AL2.0,LGPL2.1}"] }
+}
+// Debug/emulator builds remain independent of release credentials.
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.project == project && it.name.toLowerCase(java.util.Locale.ROOT).contains("release") &&
+        (it.name.startsWith("assemble") || it.name.startsWith("bundle") || it.name.startsWith("package")) }) {
+        if (!releaseSigningReady || !rootProject.file(releaseStore).isFile()) {
+            throw new GradleException("Release signing is required. Configure android/key.properties or ISME_KEYSTORE_* / ISME_KEY_* environment variables.")
+        }
+    }
 }
 flutter { source "../.." }
 dependencies {

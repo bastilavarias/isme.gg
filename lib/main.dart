@@ -11,6 +11,7 @@ import 'search_page.dart';
 import 'series_page.dart';
 import 'platform_rail.dart';
 import 'mobile/mobile_home.dart';
+import 'support_menu.dart';
 
 void main(){ WidgetsFlutterBinding.ensureInitialized(); PaintingBinding.instance.imageCache.maximumSizeBytes=48*1024*1024; PaintingBinding.instance.imageCache.maximumSize=120; runApp(const IsmeApp()); }
 class IsmeApp extends StatefulWidget {
@@ -345,31 +346,11 @@ class _CinemaHomeState extends State<CinemaHome> {
     if(anchor is! RenderBox||overlay is! RenderBox)return;
     final origin=anchor.localToGlobal(Offset.zero,ancestor:overlay);
     final rect=origin & anchor.size;
-    final v=await showMenu<String>(context:context,
+    await openSupportMenu(context,engine,()=>showMenu<SupportAction>(context:context,
       position:RelativeRect.fromRect(rect,Offset.zero & overlay.size),
-      items:[
-        const PopupMenuItem(value:'source',child:Text('Open source')),
-        const PopupMenuItem(value:'refresh',child:Text('Refresh catalog')),
-        const PopupMenuItem(value:'providers',child:Text('TMDB / streaming availability')),
-        PopupMenuItem(value:'autoplay',child:Text('Autoplay next: ${(widget.history.prefs.getBool('isme-autoplay-next')??true)?'On':'Off'}')),
-        const PopupMenuItem(value:'update',child:Text('Check updates')),
-      ]);
-    if(!mounted)return;
-    menuNav.requestFocus();
-    if(v==null)return;
-    if(v=='source'){await manual();}
-    else if(v=='refresh'){await loadPlatforms(force:true);if(!filtered)await load(force:true);}
-    else if(v=='providers'){await providerSettings();}
-    else if(v=='autoplay'){
-      final prefs=widget.history.prefs;
-      final enabled=!(prefs.getBool('isme-autoplay-next')??true);
-      await prefs.setBool('isme-autoplay-next',enabled);
-      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(enabled?'Autoplay enabled':'Autoplay disabled')));
-    }
-    else{
-      try{await engine.checkUpdates();}
-      catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Updates not configured in this development build.')));}
-    }
+      constraints:const BoxConstraints(minWidth:270,maxWidth:340),
+      items:supportMenuItems(engine)));
+    if(mounted)menuNav.requestFocus();
   }
   Future<void> providerSettings() async {
     final region=TextEditingController(text:engine.providerCountry);
