@@ -3,7 +3,15 @@ Independent source project at /home/sebastech/projects/ismegg. Original React/We
 This is an implementation draft, not a verified build. Flutter, Dart, JDK and Gradle are not available on the server PATH. No APK was compiled or installed there. Android compilation, physical TV navigation, subtitles and native playback still need verification on Windows.
 
 ## Windows one-click development launcher
-Double-click `setupwindows.bat` in the repository root (or run `.\setupwindows.bat` in PowerShell). It fast-forward pulls main from GitHub, reloads its PowerShell helper if updated, restarts `ismegg_TV_API_36` with `-no-snapshot-load` (cold boot without wiping data), waits for Android boot, prepares fonts, Gradle wrapper and dependencies, then builds, installs and launches the debug app with `flutter run`. Keep the terminal open for hot reload (`r`, `R`, `q`). Use `-ReuseEmulator` to keep an already-running emulator, `-SkipPull` to test the existing checkout without updating, or `-Avd NAME` for another AVD.
+Double-click `setupwindows.bat` in the repository root (or run `.\setupwindows.bat` in PowerShell). It fast-forward pulls main from GitHub, reloads its PowerShell helper if updated, restarts `ismegg_TV_API_36` with `-no-snapshot-load` (cold boot without wiping data), waits for Android boot, prepares fonts, Gradle wrapper and dependencies, then builds, installs and launches the debug app with `flutter run`. Keep the terminal open for hot reload (`r`, `R`, `q`). Use `-ReuseEmulator` to keep an already-running emulator, `-SkipPull` to test the existing checkout without updating, or `-Avd NAME` for another single-device AVD.
+
+```cmd
+setupwindows.bat -TV -ReuseEmulator
+setupwindows.bat -Mobile -ReuseEmulator
+setupwindows.bat -Both -ReuseEmulator
+```
+
+TV remains the default. Mobile uses `ismegg_Mobile_API_36` (create this AVD first); `-Smartphone` and `-Phone` are aliases for `-Mobile`. Both waits for the two named AVDs, prepares dependencies once, and uses Flutter's multi-device debug runner for shared hot reload and restart. Disconnect unrelated Android devices and do not attach new devices while the multi-device runner starts. The launcher checks ADB and Flutter device lists before running both. Override default AVD names with `-TvAvd NAME` and `-MobileAvd NAME`. Mode flags are mutually exclusive. Existing options and local build settings are retained. After pulling this launcher update, verify TV, mobile, both, reuse, and extra-device rejection on Windows; PowerShell/Flutter are not installed on the server.
 
 **Safe updates:** Non-conflicting tracked local edits are allowed; Git itself rejects updates that would overwrite them. No automatic stash, reset, force pull, or merge commit. Generated build outputs, local SDK paths, caches and scaffold-generated wrapper binaries/scripts are ignored; the Gradle version and Android configuration remain tracked. If a pull fails, inspect the reported paths and preserve your work before resolving the conflict.
 
