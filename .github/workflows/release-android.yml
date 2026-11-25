@@ -42,7 +42,7 @@ jobs:
           python3 -c 'import os,re; v=os.environ["VERSION"]; c=os.environ["CODE"]; assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",v); assert re.fullmatch(r"[1-9][0-9]*",c) and int(c)<=2100000000'
       - name: Prepare build
         run: |
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
           scaffold="$(mktemp -d)"
           flutter create --platforms=android --project-name ismegg --org gg.isme "$scaffold"
           cp "$scaffold/android/gradlew" android/
