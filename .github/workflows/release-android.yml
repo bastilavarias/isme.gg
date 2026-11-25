@@ -105,7 +105,7 @@ jobs:
           python3 -c 'import json,os; d=json.load(open("release/update.json")); assert d["version"]==os.environ["VERSION"] and d["versionCode"]==int(os.environ["CODE"])'
           # Require a newer versionCode than the current stable release, if any.
           tags="$(gh api "repos/$GH_REPO/releases?per_page=100" --paginate --jq '.[] | select(.draft==false and .prerelease==false) | .tag_name')"
-          latest="$(printf '%s\\n' "$tags" | sed -n '1p')"
+          latest="$(printf '%s\n' "$tags" | sed -n '1p')"
           if [ -n "$latest" ]; then
             gh release download "$latest" --pattern update.json --output "$RUNNER_TEMP/previous-update.json"
             python3 -c 'import json,os; p=json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"previous-update.json"))); assert int(os.environ["CODE"])>p["versionCode"], "versionCode must increase"'
