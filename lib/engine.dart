@@ -243,7 +243,7 @@ class History {
     if(seconds<12 || m.id.isEmpty) return;
     final data=_data;
     if(duration.inSeconds>0 && seconds/duration.inSeconds>0.97) { data.remove(m.id); }
-    else { data[m.id]={...m.toJson(),'time':seconds,'updated':DateTime.now().millisecondsSinceEpoch}; }
+    else { data[m.id]={...m.toJson(),'time':seconds,'duration':duration.inSeconds,'updated':DateTime.now().millisecondsSinceEpoch}; }
     final entries=data.entries.toList()..sort((a,b)=>(b.value['updated'] as int).compareTo(a.value['updated'] as int));
     await prefs.setString('watch-v1',jsonEncode(Map.fromEntries(entries.take(30))));
   }

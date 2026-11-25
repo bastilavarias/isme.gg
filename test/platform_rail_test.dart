@@ -1,11 +1,27 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ismegg/engine.dart';
 import 'package:ismegg/platform_rail.dart';
+import 'package:ismegg/platform_logos.dart';
 import 'package:ismegg/design.dart';
 
 void main(){
+  testWidgets('all twelve bundled logos decode without metadata credentials',(tester)async{
+    await tester.runAsync(()async{
+      for(final brand in PlatformBrand.brands.skip(1)){
+        final bytes=bundledPlatformLogo(brand.key);
+        expect(bytes,isNotNull,reason:brand.name);
+        final codec=await ui.instantiateImageCodec(bytes!);
+        final frame=await codec.getNextFrame();
+        expect(frame.image.width,greaterThan(0));
+        expect(frame.image.height,greaterThan(0));
+        frame.image.dispose();codec.dispose();
+      }
+    });
+    expect(bundledPlatformLogo('all'),isNull);
+  });
   test('platform aliases use exact provider names, not unrelated channels',(){
     final prime=PlatformBrand.brands.firstWhere((b)=>b.key=='prime');
     const rows=[

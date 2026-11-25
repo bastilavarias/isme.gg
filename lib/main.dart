@@ -10,6 +10,7 @@ import 'platform_pill.dart';
 import 'search_page.dart';
 import 'series_page.dart';
 import 'platform_rail.dart';
+import 'mobile/mobile_home.dart';
 
 void main(){ WidgetsFlutterBinding.ensureInitialized(); PaintingBinding.instance.imageCache.maximumSizeBytes=48*1024*1024; PaintingBinding.instance.imageCache.maximumSize=120; runApp(const IsmeApp()); }
 class IsmeApp extends StatefulWidget {
@@ -29,8 +30,10 @@ class _IsmeAppState extends State<IsmeApp> {
     home:engine==null?Scaffold(body:Center(child:Column(mainAxisSize:MainAxisSize.min,children:[
       const Wordmark(size:48),const SizedBox(height:24),
       if(error==null)const CircularProgressIndicator() else ...[Text(error!),TextButton(onPressed:(){setState(()=>error=null);boot();},child:const Text('Retry'))]
-    ]))):CinemaHome(engine:engine!,history:history!));
+    ]))):deviceHome(engine!,history!));
 }
+/// Device classification comes from Android's UI mode, not screen orientation.
+Widget deviceHome(NativeEngine engine,History history)=>engine.tv?CinemaHome(engine:engine,history:history):MobileHome(engine:engine,history:history);
 class Wordmark extends StatelessWidget {
   final double size;const Wordmark({super.key,this.size=24});
   @override Widget build(BuildContext context)=>Text.rich(TextSpan(style:TextStyle(fontSize:size,fontWeight:FontWeight.w800,letterSpacing:-1.2,color:CinemaColors.ink),children:const [TextSpan(text:'isme'),TextSpan(text:'.',style:TextStyle(color:CinemaColors.accent)),TextSpan(text:'gg')]));

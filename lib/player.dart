@@ -19,6 +19,39 @@ class CinemaPlayer extends StatefulWidget {
 }
 class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver {
   VideoPlayerController? player;
+  bool _touchLocked=false,_mobileFullscreen=false;
+  double? _doubleTapX;
+  Duration? _scrubTarget;
+  Future<void> _toggleFullscreen() async{
+    if(widget.engine.tv||closed)return;
+    final enable=!_mobileFullscreen;
+    setState(()=>_mobileFullscreen=enable);
+    try{
+      await SystemChrome.setPreferredOrientations(enable?
+        [DeviceOrientation.landscapeLeft,DeviceOrientation.landscapeRight]:[]);
+      await SystemChrome.setEnabledSystemUIMode(enable?SystemUiMode.immersiveSticky:SystemUiMode.edgeToEdge);
+    }catch(_){if(mounted&&!closed)notice('Fullscreen is unavailable on this device.');}
+    if(mounted&&!closed)showControls();
+  }
+  Future<void> _restoreMobileDisplay() async{
+    if(widget.engine.tv||!_mobileFullscreen)return;
+    _mobileFullscreen=false;
+    try{
+      await SystemChrome.setPreferredOrientations([]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }catch(_){}
+  }
+  void _toggleLock(){
+    if(widget.engine.tv||closed)return;
+    hide?.cancel();
+    setState((){_touchLocked=!_touchLocked;controls=!_touchLocked;});
+    if(!_touchLocked)showControls();
+  }
+  void _touchTap(){
+    if(_touchLocked||closed||leaving)return;
+    if(controls){hide?.cancel();setState(()=>controls=false);}
+    else showControls();
+  }
   late Movie _movie;
   final _nextGate=NextEpisodeGate();
   final _watchClock=Stopwatch()..start();
@@ -102,7 +135,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(!_showNext||!_autoplay||_countdownTimer!=null||!_foreground||
         !currentRoute||settingsOpen||player?.value.isCompleted!=true)return;
     hide?.cancel();
-    setState((){_countdown=5;controls=true;});
+    setState((){_countdown=5;controls=true;if(!widget.engine.tv)_touchLocked=false;});
     if(widget.engine.tv)WidgetsBinding.instance.addPostFrameCallback((_){
       if(mounted&&_showNext&&_countdown!=null)focusControl(_nextFocus);
     });
@@ -388,7 +421,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   void armControlsTimer(){
     hide?.cancel();
-    if(!closed&&!settingsOpen&&controls&&player?.value.isPlaying==true&&!_nextFocus.hasFocus&&!_creditsFocus.hasFocus){
+    if(!closed&&!settingsOpen&&!_touchLocked&&controls&&player?.value.isPlaying==true&&!_nextFocus.hasFocus&&!_creditsFocus.hasFocus){
       hide=Timer(const Duration(seconds:6),(){
         if(!mounted||closed||settingsOpen||player?.value.isPlaying!=true||_nextFocus.hasFocus||_creditsFocus.hasFocus)return;
         // Keep a focus target mounted even when every control is hidden.
@@ -398,7 +431,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     }
   }
   void showControls({bool focus=false}){
-    if(!mounted||closed||leaving)return;
+    if(!mounted||closed||leaving||(!widget.engine.tv&&_touchLocked))return;
     final reveal=!controls;
     if(reveal)setState(()=>controls=true);
     if((reveal||focus)&&player!=null&&!settingsOpen){
@@ -512,7 +545,11 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   Future<T?> settingsDialog<T>(WidgetBuilder builder) async{
     if(settingsOpen||!currentRoute)return null;
     settingsOpen=true;hide?.cancel();
-    try{return await showDialog<T>(context:context,builder:(ctx)=>Shortcuts(shortcuts:const {SingleActivator(LogicalKeyboardKey.select):ActivateIntent(),SingleActivator(LogicalKeyboardKey.enter):ActivateIntent()},child:builder(ctx)));}
+    try{
+      if(!widget.engine.tv)return await showModalBottomSheet<T>(context:context,isScrollControlled:true,showDragHandle:true,
+        builder:(ctx)=>SafeArea(child:ConstrainedBox(constraints:BoxConstraints(maxHeight:MediaQuery.sizeOf(ctx).height*.82),
+          child:SingleChildScrollView(child:builder(ctx)))));
+      return await showDialog<T>(context:context,builder:(ctx)=>Shortcuts(shortcuts:const {SingleActivator(LogicalKeyboardKey.select):ActivateIntent(),SingleActivator(LogicalKeyboardKey.enter):ActivateIntent()},child:builder(ctx)));}
     finally{settingsOpen=false;if(mounted&&!closed&&currentRoute)showControls(focus:true);}
   }
   Future<void> captions() async {
@@ -645,10 +682,10 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     try{await widget.engine.stop();}catch(_){}
   }
   Future<void> leave() async {
-    if(leaving)return;setState(()=>leaving=true);await shutdown();
+    if(leaving)return;setState(()=>leaving=true);await shutdown();await _restoreMobileDisplay();
     if(mounted)Navigator.of(context).pop();
   }
-  @override void dispose(){HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());playerFocus.dispose();for(final node in [playFocus,backFocus,debugFocus,seekFocus,rewindFocus,forwardFocus,ccFocus,audioFocus,sourceFocus,_nextFocus,_creditsFocus]){node.dispose();}super.dispose();}
+  @override void dispose(){HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());unawaited(_restoreMobileDisplay());playerFocus.dispose();for(final node in [playFocus,backFocus,debugFocus,seekFocus,rewindFocus,forwardFocus,ccFocus,audioFocus,sourceFocus,_nextFocus,_creditsFocus]){node.dispose();}super.dispose();}
   String clock(Duration d){final h=d.inHours,m=d.inMinutes.remainder(60).toString().padLeft(2,'0'),s=d.inSeconds.remainder(60).toString().padLeft(2,'0');return h>0?'$h:$m:$s':'$m:$s';}
   Widget diagnosticsPanel(VideoPlayerValue? v){
     final position=v?.position??resume;
@@ -702,9 +739,10 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     final next=_next!;
     final tv=widget.engine.tv;
     final remaining=_countdown;
-    final width=(MediaQuery.sizeOf(context).width*.42).clamp(150.0,tv?300.0:240.0).toDouble();
+    final screen=MediaQuery.sizeOf(context);
+    final width=(screen.width*(tv ? .42 : (screen.width<screen.height ? .78 : .38))).clamp(150.0,tv?300.0:280.0).toDouble();
     final identity=EpisodeIdentity.parse(next);
-    return Positioned(right:tv?32:12,bottom:controls?(tv?124:108):24,
+    return Positioned(right:tv?32:12,bottom:controls?(tv?124:132):24,
       child:ConstrainedBox(constraints:BoxConstraints(maxWidth:width),
         child:Material(color:const Color(0xF0222220),borderRadius:BorderRadius.circular(12),clipBehavior:Clip.antiAlias,
           child:Padding(padding:const EdgeInsets.all(10),child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[
@@ -726,9 +764,16 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   Widget progressBar(VideoPlayerController c,VideoPlayerValue v){
     final tv=widget.engine.tv;
     final max=v.duration.inMilliseconds>0?v.duration.inMilliseconds.toDouble():1.0;
+    if(!tv)return Slider(value:(_scrubTarget??v.position).inMilliseconds.clamp(0,max).toDouble(),max:max,
+      onChangeStart:(n){hide?.cancel();setState(()=>_scrubTarget=Duration(milliseconds:n.round()));},
+      onChanged:(n){setState(()=>_scrubTarget=Duration(milliseconds:n.round()));},
+      onChangeEnd:(n){
+        final target=Duration(milliseconds:n.round());
+        setState((){_scrubTarget=null;_markSeek(target,c.value.duration);});
+        unawaited(c.seekTo(target));showControls();
+      });
     final slider=Slider(value:v.position.inMilliseconds.clamp(0,max).toDouble(),max:max,
       onChanged:(n){lastAdvance=DateTime.now();final target=Duration(milliseconds:n.round());_markSeek(target,c.value.duration);unawaited(c.seekTo(target));showControls();if(mounted)setState((){});});
-    if(!tv)return slider;
     // A TV's slider must not consume up/down as value-changing keys.
     // Own its focus explicitly and keep the underlying touch slider usable.
     return Focus(focusNode:seekFocus,onFocusChange:(focused){
@@ -746,8 +791,35 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         color:seekFocus.hasFocus?const Color(0x22FFFFFF):Colors.transparent),
       child:ExcludeFocus(child:slider)));
   }
+  Widget _touchButton(String label,IconData icon,VoidCallback action,{double size=24})=>IconButton(
+    tooltip:label,onPressed:action,icon:Icon(icon,size:size),style:IconButton.styleFrom(
+      foregroundColor:CinemaColors.ink,minimumSize:const Size(48,48),tapTargetSize:MaterialTapTargetSize.padded));
+  Widget _touchCenter(VideoPlayerValue v)=>controlOverlay(Row(mainAxisAlignment:MainAxisAlignment.center,children:[
+    _touchButton('Back 10 seconds',Icons.replay_10,()=>seek(-10),size:30),
+    const SizedBox(width:12),
+    IconButton.filled(onPressed:toggle,tooltip:v.isPlaying?'Pause':'Play',icon:Icon(v.isPlaying?Icons.pause:Icons.play_arrow,size:38),
+      style:IconButton.styleFrom(backgroundColor:const Color(0x55FFFFFF),foregroundColor:CinemaColors.ink,minimumSize:const Size(68,68))),
+    const SizedBox(width:12),
+    _touchButton('Forward 10 seconds',Icons.forward_10,()=>seek(10),size:30),
+  ]),top:false);
+  Widget _touchBottom(VideoPlayerController c,VideoPlayerValue v)=>controlOverlay(Container(
+    decoration:const BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,
+      colors:[Colors.transparent,Color(0xDD000000),CinemaColors.black])),
+    padding:const EdgeInsets.fromLTRB(12,12,12,6),child:Column(mainAxisSize:MainAxisSize.min,children:[
+      Row(children:[
+        Text(clock(_scrubTarget??v.position),style:const TextStyle(fontSize:12)),
+        Expanded(child:progressBar(c,v)),Text(clock(v.duration),style:const TextStyle(fontSize:12)),
+      ]),
+      Row(mainAxisAlignment:MainAxisAlignment.spaceEvenly,children:[
+        _touchButton('Subtitles',Icons.closed_caption_outlined,captions),
+        _touchButton('Audio tracks',Icons.audiotrack,chooseAudio),
+        if(sources.length>1)_touchButton('Playback source',Icons.tune,chooseSource),
+        _touchButton(_mobileFullscreen?'Exit fullscreen':'Fullscreen',_mobileFullscreen?Icons.fullscreen_exit:Icons.fullscreen,()=>unawaited(_toggleFullscreen())),
+      ]),
+    ])),top:false);
   Widget playbackControls(VideoPlayerController c,VideoPlayerValue v){
     final tv=widget.engine.tv;
+    if(!tv)return _touchBottom(c,v);
     return controlOverlay(Container(
       decoration:const BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,
         colors:[Colors.transparent,Color(0xCC000000),CinemaColors.black],stops:[0,.55,1])),
@@ -774,7 +846,14 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       child:Scaffold(backgroundColor:CinemaColors.black,body:SafeArea(child:Focus(
       focusNode:playerFocus,autofocus:true,onKeyEvent:(_,event)=>handleRemote(event),
       child:Shortcuts(shortcuts:const {SingleActivator(LogicalKeyboardKey.select):ActivateIntent(),SingleActivator(LogicalKeyboardKey.enter):ActivateIntent()},child:Stack(fit:StackFit.expand,children:[
-        if(c!=null&&!leaving)GestureDetector(onTap:showControls,child:Center(child:AspectRatio(aspectRatio:c.value.aspectRatio,child:VideoPlayer(c)))),
+        if(c!=null&&!leaving)GestureDetector(behavior:widget.engine.tv?HitTestBehavior.deferToChild:HitTestBehavior.opaque,
+          onTap:widget.engine.tv?showControls:_touchTap,
+          onDoubleTapDown:widget.engine.tv||_touchLocked?null:(details)=>_doubleTapX=details.localPosition.dx,
+          onDoubleTap:widget.engine.tv||_touchLocked?null:(){
+            final x=_doubleTapX;if(x==null)return;
+            unawaited(seek(x<MediaQuery.sizeOf(context).width/2?-10:10));
+          },
+          child:Center(child:AspectRatio(aspectRatio:c.value.aspectRatio,child:VideoPlayer(c)))),
         if(busy||leaving)loadingView(caption:loadingCaption,percentage:leaving?null:'$progress%'),
         if(error!=null&&!leaving)Center(child:Padding(padding:const EdgeInsets.all(32),child:Column(mainAxisSize:MainAxisSize.min,children:[
           Text(error!,textAlign:TextAlign.center),const SizedBox(height:16),FilledButton(autofocus:true,onPressed:()=>start(index:source),child:const Text('Retry')),
@@ -788,18 +867,22 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
             child:ConstrainedBox(constraints:BoxConstraints(maxWidth:MediaQuery.sizeOf(context).width*.88),
               child:Container(color:const Color(0xCC000000),padding:const EdgeInsets.symmetric(horizontal:10,vertical:5),
                 child:Text(v.caption.text,textAlign:TextAlign.center,style:TextStyle(fontSize:captionFontSize,height:1.25))))),
-          Positioned(left:0,right:0,bottom:0,child:playbackControls(c,v)),
+          if(!widget.engine.tv&&!_touchLocked&&!_showNext)Center(child:_touchCenter(v)),
+          if(widget.engine.tv||!_touchLocked)Positioned(left:0,right:0,bottom:0,child:playbackControls(c,v)),
         ])),
-        if(!leaving)Positioned(left:0,top:0,right:0,child:controlOverlay(Container(
+        if(!leaving&&(widget.engine.tv||!_touchLocked))Positioned(left:0,top:0,right:0,child:controlOverlay(Container(
           decoration:const BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,
             colors:[Color(0xDD000000),Colors.transparent])),
           padding:EdgeInsets.fromLTRB(widget.engine.tv?24:8,8,widget.engine.tv?24:8,22),
           child:Row(children:[
             controlButton(backFocus,'Back',Icons.arrow_back,leave,compact:true),
             Expanded(child:Text(_movie.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:20,fontWeight:FontWeight.w600))),
-            if(kDebugMode)controlButton(debugFocus,'Playback diagnostics',Icons.bug_report_outlined,showDiagnostics,compact:true),
+            if(!widget.engine.tv&&c!=null)_touchButton('Lock controls',Icons.lock_open,_toggleLock),
+            if(kDebugMode&&widget.engine.tv)controlButton(debugFocus,'Playback diagnostics',Icons.bug_report_outlined,showDiagnostics,compact:true),
           ])),top:true)),
-        if(_showNext&&c!=null)nextEpisodeOverlay(),
+        if(_touchLocked&&!widget.engine.tv&&!leaving)Positioned(top:8,right:8,child:IconButton.filledTonal(
+          tooltip:'Unlock controls',onPressed:_toggleLock,icon:const Icon(Icons.lock))),
+        if(_showNext&&c!=null&&(widget.engine.tv||!_touchLocked))nextEpisodeOverlay(),
         if(kDebugMode&&diagnostics&&!leaving)Positioned(top:64,right:16,child:IgnorePointer(child:Container(width:260,padding:const EdgeInsets.all(12),color:const Color(0xE611110F),child:c==null?diagnosticsPanel(null):ValueListenableBuilder<VideoPlayerValue>(valueListenable:c,builder:(_,v,__)=>diagnosticsPanel(v)))))
       ]))))));
   }
