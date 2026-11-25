@@ -56,13 +56,13 @@ function Find-CompatibleJdk {
         }
     }
     foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
-        $home = $candidate.Trim('"')
-        if (-not (Test-Path -LiteralPath (Join-Path $home 'bin\javac.exe') -PathType Leaf)) { continue }
-        $release = Join-Path $home 'release'
+        $jdkHome = $candidate.Trim('"')
+        if (-not (Test-Path -LiteralPath (Join-Path $jdkHome 'bin\javac.exe') -PathType Leaf)) { continue }
+        $release = Join-Path $jdkHome 'release'
         if (-not (Test-Path -LiteralPath $release -PathType Leaf)) { continue }
         $versionLine = Get-Content -LiteralPath $release | Where-Object { $_ -match '^JAVA_VERSION="' } | Select-Object -First 1
         if ($versionLine -match '^JAVA_VERSION="(17|21)(?:\.|"|-)') {
-            return (Resolve-Path -LiteralPath $home).Path
+            return (Resolve-Path -LiteralPath $jdkHome).Path
         }
     }
     throw 'JDK 17 or 21 is required for Gradle 8.13. Install with: winget install --id EclipseAdoptium.Temurin.21.JDK -e ; then rerun, or pass -JdkDir "C:\path\to\jdk-21".'
