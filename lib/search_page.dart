@@ -43,7 +43,7 @@ class CinemaSearchPageState extends State<CinemaSearchPage> {
     final value=widget.controller.text;
     if(value.isNotEmpty)change(String.fromCharCodes(value.runes.take(value.runes.length-1)));
   }
-  void activate(int i){
+  void _activateKey(int i){
     if(i<36)append(letters[i]);
     else if(i==36)append(' ');
     else if(i==37)erase();
@@ -157,7 +157,7 @@ class CinemaSearchPageState extends State<CinemaSearchPage> {
   }
   Widget keyTile(int i,String label,{IconData? icon})=>RemoteTile(
     key:ValueKey('search-key-$i'),label:label,focusNode:keys[i],
-    revealOnFocus:false,onFocused:()=>lastKey=i,onPressed:()=>activate(i),
+    revealOnFocus:false,onFocused:()=>lastKey=i,onPressed:()=>_activateKey(i),
     child:ColoredBox(color:CinemaColors.panel,child:Center(child:icon==null
       ?Text(label,style:TextStyle(fontSize:i<36?19:12,fontWeight:FontWeight.w600))
       :Icon(icon,size:20))));
