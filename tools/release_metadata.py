@@ -40,9 +40,13 @@ def generate(apk, output, version, code, aapt2, apksigner, expected_signer):
     expected_signer = expected_signer.replace(":", "").strip().lower()
     if not re.fullmatch(r"[a-f0-9]{64}", expected_signer) or [x.lower() for x in fingerprints] != [expected_signer]:
         raise ValueError("APK is not signed by the expected permanent release certificate")
+    abis = ("arm64-v8a", "armeabi-v7a")
     with ZipFile(apk) as archive:
         names = set(archive.namelist())
-        for abi in ("arm64-v8a", "armeabi-v7a"):
+        native_abis = {name.split("/")[1] for name in names if name.startswith("lib/") and name.endswith(".so")}
+        if native_abis != set(abis):
+            raise ValueError("APK native libraries must target ARM64 and ARMv7 only")
+        for abi in abis:
             if f"lib/{abi}/libflutter.so" not in names:
                 raise ValueError(f"Flutter native library missing for {abi}")
             if not any(n.startswith(f"lib/{abi}/") and "torrent" in n.lower() and n.endswith(".so") for n in names):
@@ -51,7 +55,7 @@ def generate(apk, output, version, code, aapt2, apksigner, expected_signer):
         checksum = hashlib.file_digest(stream, "sha256").hexdigest()
     metadata = dict(version=version, versionCode=code, minimumAndroidSdk=minimum,
                     packageId=PACKAGE, asset="isme.apk", bytes=size, sha256=checksum,
-                    abis=["arm64-v8a", "armeabi-v7a"])
+                    abis=list(abis))
     output.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(apk, output / "isme.apk")
     (output / "update.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")

@@ -44,6 +44,17 @@ class ReleaseMetadataTest(unittest.TestCase):
             with patch.object(release, "run", side_effect=[BADGING, "Signer #1 certificate SHA-256 digest: " + "b"*64]), self.assertRaises(ValueError):
                 release.generate(apk, out, "0.5.0", 5, "aapt2", "apksigner", SIGNER)
 
+    def test_reject_extra_native_abi(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            apk = Path(tmp) / "test.apk"
+            with ZipFile(apk, "w") as z:
+                for abi in ("arm64-v8a", "armeabi-v7a"):
+                    z.writestr(f"lib/{abi}/libflutter.so", b"test")
+                    z.writestr(f"lib/{abi}/libtorrent4j.so", b"test")
+                z.writestr("lib/x86_64/libdatastore_shared_counter.so", b"test")
+            with patch.object(release, "run", side_effect=[BADGING, f"Signer #1 certificate SHA-256 digest: {SIGNER}"]), self.assertRaisesRegex(ValueError, "ARM64 and ARMv7 only"):
+                release.generate(apk, Path(tmp) / "release", "0.5.0", 5, "aapt2", "apksigner", SIGNER)
+
     def test_missing_abi(self):
         with tempfile.TemporaryDirectory() as tmp:
             apk = Path(tmp) / "test.apk"
