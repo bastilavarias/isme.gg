@@ -27,15 +27,13 @@ void main(){
     engine.tv=true;
     expect(deviceHome(engine,history),isA<CinemaHome>());
   });
-  test('bookmarks are local and watch progress remains backward compatible',()async{
+  test('watch progress remains backward compatible',()async{
     SharedPreferences.setMockInitialValues({});
     final history=History(await SharedPreferences.getInstance()),library=MobileLibrary(History(await SharedPreferences.getInstance()));
     const film=MobileTestEngine.film;
-    await library.toggle(film);expect(library.contains(film),isTrue);
     await history.save(film,const Duration(seconds:30),const Duration(seconds:100));
     expect(library.fraction(film),.3);
     expect(history.position(film),const Duration(seconds:30));
-    await library.toggle(film);expect(library.contains(film),isFalse);
   });
   testWidgets('mobile shell switches navigation without TV expansion',(tester)async{
     SharedPreferences.setMockInitialValues({});
@@ -46,15 +44,26 @@ void main(){
     final history=History(await SharedPreferences.getInstance());
     await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:deviceHome(engine,history)));
     await tester.pumpAndSettle();
-    expect(find.byType(NavigationBar),findsOneWidget);
+    for(final label in ['Home','Search','Movies','TV Series','Anime','Pinoy']){
+      expect(find.byKey(ValueKey('mobile-nav-$label')),findsOneWidget);
+    }
+    expect(find.text('Browse'),findsNothing);
+    expect(find.text('My List'),findsNothing);
+    expect(find.byKey(const ValueKey('mobile-bottom-nav')),findsOneWidget);
+    expect(find.byKey(const ValueKey('mobile-side-nav')),findsNothing);
     expect(find.text('Explore platforms'),findsOneWidget);
-    await tester.tap(find.text('Search'));await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('mobile-nav-Search')));await tester.pumpAndSettle();
     expect(find.byType(TextField),findsOneWidget);
-    await tester.tap(find.text('My List'));await tester.pumpAndSettle();
-    expect(find.text('Your list is empty'),findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('mobile-nav-Movies')));await tester.pumpAndSettle();
+    expect(find.text('Explore platforms'),findsNothing);
     tester.view.physicalSize=const Size(844,390);
     await tester.pumpAndSettle();
-    expect(find.byType(NavigationRail),findsOneWidget);
+    expect(find.byKey(const ValueKey('mobile-bottom-nav')),findsNothing);
+    expect(find.byKey(const ValueKey('mobile-side-nav')),findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('mobile-nav-Pinoy')));await tester.pumpAndSettle();
+    expect(find.text('Explore platforms'),findsNothing);
+    await tester.tap(find.byKey(const ValueKey('mobile-nav-Home')));await tester.pumpAndSettle();
+    expect(find.text('Explore platforms'),findsOneWidget);
     expect(tester.takeException(),isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -67,6 +76,8 @@ void main(){
     await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:MobileDetails(movie:MobileTestEngine.show,engine:engine,library:library)));
     await tester.pumpAndSettle();
     expect(find.text('Pilot 1'),findsOneWidget);
+    expect(find.text('My List'),findsNothing);
+    expect(find.text('Copy title'),findsNothing);
     await tester.tap(find.text('Season 1'));await tester.pumpAndSettle();
     await tester.tap(find.text('Season 2'));await tester.pumpAndSettle();
     expect(find.text('Pilot 2'),findsOneWidget);

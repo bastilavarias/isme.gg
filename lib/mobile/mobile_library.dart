@@ -1,24 +1,10 @@
 import 'dart:convert';
 import '../engine.dart';
 
-/// Local-only bookmarks. Existing watch-v1 records remain compatible with TV.
+/// Read-only mobile presentation helpers over the shared TV watch history.
 class MobileLibrary {
   final History history;
   MobileLibrary(this.history);
-  Map<String,Movie> get saved {
-    try{
-      final rows=jsonDecode(history.prefs.getString('isme-mobile-list-v1')??'[]') as List;
-      return {for(final row in rows.whereType<Map<String,dynamic>>())
-        if(Movie.fromJson(row).id.isNotEmpty)Movie.fromJson(row).id:Movie.fromJson(row)};
-    }catch(_){return {};}
-  }
-  bool contains(Movie movie)=>saved.containsKey(movie.id);
-  Future<void> toggle(Movie movie) async{
-    final items=saved;
-    if(items.containsKey(movie.id)){items.remove(movie.id);}
-    else{items[movie.id]=movie;}
-    await history.prefs.setString('isme-mobile-list-v1',jsonEncode(items.values.take(200).map((m)=>m.toJson()).toList()));
-  }
   List<Movie> get recent=>history.movies();
   Movie? resumeFor(Movie show){
     for(final m in recent){

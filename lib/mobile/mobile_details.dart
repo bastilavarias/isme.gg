@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../design.dart';
 import '../engine.dart';
 import '../next_episode.dart';
@@ -65,10 +64,6 @@ class _MobileDetailsState extends State<MobileDetails>{
       if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Playback information is unavailable.')));
     }finally{if(mounted)setState(()=>opening=false);}
   }
-  Future<void> bookmark() async{
-    await widget.library.toggle(movie);
-    if(mounted)setState((){});
-  }
   @override Widget build(BuildContext context){
     final resumed=widget.library.resumeFor(movie);
     final resumedId=resumed==null?null:EpisodeIdentity.parse(resumed);
@@ -94,13 +89,6 @@ class _MobileDetailsState extends State<MobileDetails>{
         const SizedBox(height:12),
         if(movie.description.isNotEmpty)Text(movie.description,style:const TextStyle(fontSize:14,height:1.5)),
         const SizedBox(height:8),
-        Row(children:[
-          TextButton.icon(onPressed:bookmark,icon:Icon(widget.library.contains(movie)?Icons.bookmark:Icons.bookmark_border),label:Text(widget.library.contains(movie)?'Saved':'My List')),
-          TextButton.icon(onPressed:()async{
-            await Clipboard.setData(ClipboardData(text:movie.title));
-            if(context.mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Title copied')));
-          },icon:const Icon(Icons.copy),label:const Text('Copy title')),
-        ]),
         if(movie.episodic)Row(children:[
           const Expanded(child:Text('Episodes',style:TextStyle(fontSize:20,fontWeight:FontWeight.w700))),
           if(seasons.isNotEmpty)TextButton.icon(onPressed:chooseSeason,icon:const Icon(Icons.expand_more),label:Text(seasons.where((s)=>s.number==season).firstOrNull?.name??'Season')),

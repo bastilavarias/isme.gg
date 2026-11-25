@@ -15,48 +15,45 @@ class MobileHome extends StatefulWidget{
   @override State<MobileHome> createState()=>_MobileHomeState();
 }
 class _MobileHomeState extends State<MobileHome>{
-  static const categories=['All','Movies','TV Series','Anime','Pinoy'];
+  static const categories=['Home','Movies','TV Series','Anime','Pinoy'];
   static const baseRows={
-    'trending':'Trending movies','series':'Popular TV series','anime':'Popular anime',
+    'trending':'Trending movies','series':'Popular series','anime':'Popular anime',
     'pinoy':'Filipino movies','korean':'Korean movies','action':'Action movies','horror':'Horror movies',
   };
   final shelves=<String,List<Movie>>{};
   final failures=<String>{};
-  final homeScroll=ScrollController(),searchScroll=ScrollController(),browseScroll=ScrollController(),libraryScroll=ScrollController();
+  final homeScroll=ScrollController(),searchScroll=ScrollController();
   final query=TextEditingController();
   final searchFocus=FocusNode();
   final pageStorage=PageStorageBucket();
   late final MobileLibrary library;
   List<WatchProvider> directory=[],artwork=[];
   PlatformBrand platform=PlatformBrand.all;
-  String category='All',searchCategory='All';
+  String category='Home',searchCategory='All';
   List<Movie> results=[];
   List<String> recent=[];
   int tab=0,revision=0,searchRevision=0,directoryRevision=0;
   bool busy=true,searching=false,platformBusy=false,searchFailed=false,opening=false;
   Timer? debounce;
   NativeEngine get engine=>widget.engine;
-  bool get filtered=>platform.key!='all';
+  bool get filtered=>category=='Home'&&platform.key!='all';
 
   Map<String,String> get rows{
     if(filtered){
       final p=platform.matches(directory),movie=p.any((x)=>x.movie),tv=p.any((x)=>x.tv);
-      final films=movie&&(category=='All'||category=='Movies');
-      final shows=tv&&(category=='All'||category=='TV Series');
-      final anime=tv&&(category=='Anime'||(category=='All'&&platform.key=='crunchyroll'));
       return {
-        if(films)'movie:popular':'Popular movies',
-        if(shows)'tv:popular':'Popular TV series',
-        if(anime)'tv:anime':'Popular anime',
-        if(films)'movie:recent':'Recently released movies',
-        if(shows)'tv:recent':'Recently released series',
-        if(films)'movie:rated':'Top rated movies',
-        if(shows)'tv:rated':'Top rated series',
+        if(tv&&platform.key=='crunchyroll')'tv:anime':'Popular anime',
+        if(movie)'movie:popular':'Popular movies',
+        if(tv&&platform.key!='crunchyroll')'tv:popular':'Popular series',
+        if(movie)'movie:recent':'Recently released movies',
+        if(tv)'tv:recent':'Recently released series',
+        if(movie)'movie:rated':'Top rated movies',
+        if(tv)'tv:rated':'Top rated series',
       };
     }
     return switch(category){
-      'Movies'=>{'trending':'Trending movies','english':'English movies','action':'Action','horror':'Horror','scifi':'Sci-fi','top_rated':'Top rated'},
-      'TV Series'=>{'series':'Popular TV series','series_rated':'Top rated series'},
+      'Movies'=>{'trending':'Trending movies','pinoy':'Filipino movies','korean':'Korean movies','english':'English movies','action':'Action movies','horror':'Horror movies','scifi':'Sci-fi movies','top_rated':'Top rated movies'},
+      'TV Series'=>{'series':'Popular series','series_rated':'Top rated series'},
       'Anime'=>{'anime':'Popular anime','anime_rated':'Top rated anime'},
       'Pinoy'=>{'pinoy':'Filipino movies',if(engine.providersConfigured)'series_pinoy':'Filipino TV series'},
       _=>baseRows,
@@ -69,7 +66,7 @@ class _MobileHomeState extends State<MobileHome>{
   }
   @override void dispose(){
     revision++;searchRevision++;directoryRevision++;debounce?.cancel();
-    for(final s in [homeScroll,searchScroll,browseScroll,libraryScroll]){s.dispose();}
+    for(final s in [homeScroll,searchScroll]){s.dispose();}
     query.dispose();searchFocus.dispose();super.dispose();
   }
   Future<void> loadDirectory({bool refresh=false}) async{
@@ -96,7 +93,7 @@ class _MobileHomeState extends State<MobileHome>{
   }
   Future<void> load({bool refresh=false}) async{
     final n=++revision,requested=Map<String,String>.of(rows);
-    final brand=platform,providers=List<WatchProvider>.of(directory);
+    final brand=filtered?platform:PlatformBrand.all,providers=List<WatchProvider>.of(directory);
     bool current()=>mounted&&revision==n;
     setState((){busy=true;failures.clear();shelves.removeWhere((key,_)=>!requested.containsKey(key));});
     Future<CatalogSnapshot> snapshot(String key,String mode){
@@ -113,12 +110,12 @@ class _MobileHomeState extends State<MobileHome>{
         CatalogSnapshot? saved;
         try{
           saved=await snapshot(key,'cached');
-          if(current()&&saved.movies.isNotEmpty){final items=saved.movies;setState(()=>shelves[key]=category=='TV Series'?items.where((m)=>m.type=='Series').toList():items);}
+          if(current()&&saved.movies.isNotEmpty){final items=saved.movies;setState(()=>shelves[key]=items);}
         }catch(_){}
         if(!current()||(!refresh&&saved?.cacheHit==true&&saved?.stale==false))return;
         try{
           final data=await snapshot(key,refresh?'refresh':'normal');
-          if(current())setState(()=>shelves[key]=category=='TV Series'?data.movies.where((m)=>m.type=='Series').toList():data.movies);
+          if(current())setState(()=>shelves[key]=data.movies);
         }catch(_){if(current()&&shelves[key]?.isNotEmpty!=true)setState(()=>failures.add(key));}
       }));
     }
@@ -129,11 +126,12 @@ class _MobileHomeState extends State<MobileHome>{
     else{await load(refresh:true);unawaited(loadDirectory(refresh:true));}
   }
   void setCategory(String value){
-    if(category==value&&tab==0)return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    if(category==value&&tab==0){if(homeScroll.hasClients)homeScroll.jumpTo(0);return;}
     setState((){
       if(value!=category)shelves.clear();
       category=value;tab=0;
-      if(value=='Pinoy'){platform=PlatformBrand.all;}
+
     });
     if(homeScroll.hasClients)homeScroll.jumpTo(0);
     unawaited(load());
@@ -143,7 +141,7 @@ class _MobileHomeState extends State<MobileHome>{
     setState((){
       if(brand.key!=platform.key)shelves.clear();
       platform=brand;tab=0;
-      if(category=='Pinoy')category='All';
+      category='Home';
     });
     if(homeScroll.hasClients)homeScroll.jumpTo(0);
     unawaited(load());
@@ -165,7 +163,7 @@ class _MobileHomeState extends State<MobileHome>{
     final needle=term.toLowerCase();
     setState((){
       searching=term.isNotEmpty;searchFailed=false;
-      results=term.isEmpty?[]:unique([...shelves.values.expand((x)=>x),...library.saved.values,...library.recent].where((m)=>m.title.toLowerCase().contains(needle)));
+      results=term.isEmpty?[]:unique([...shelves.values.expand((x)=>x),...library.recent].where((m)=>m.title.toLowerCase().contains(needle)));
     });
     if(term.isEmpty)return;
     debounce=Timer(const Duration(milliseconds:350),()async{
@@ -197,10 +195,6 @@ class _MobileHomeState extends State<MobileHome>{
       await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>resolved.isEpisode?CinemaPlayer(movie:resolved,engine:engine,history:widget.history):MobileDetails(movie:resolved,engine:engine,library:library)));
     }catch(_){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Title details are unavailable.')));}
     finally{opening=false;if(mounted)setState((){});}
-  }
-  void seeAll(String title,List<Movie> movies){
-    Navigator.of(context).push(MaterialPageRoute(builder:(_)=>Scaffold(
-      appBar:AppBar(title:Text(title)),body:SafeArea(child:MobileGrid(movies:movies,engine:engine,onOpen:open)))));
   }
   Future<void> metadataSettings() async{
     final country=TextEditingController(text:engine.providerCountry),token=TextEditingController();
@@ -255,12 +249,14 @@ class _MobileHomeState extends State<MobileHome>{
         onSelected:(_)=>onChanged(label),showCheckmark:false,labelStyle:TextStyle(color:label==selected?CinemaColors.accent:CinemaColors.ink,fontSize:12),
         selectedColor:const Color(0x333F3124),side:BorderSide(color:label==selected?CinemaColors.accent:const Color(0x335F5A55)))),
     ]));
-  Widget heading(String title,{VoidCallback? all})=>Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:Row(children:[
-    Expanded(child:Text(title,style:const TextStyle(fontSize:19,fontWeight:FontWeight.w700))),
-    if(all!=null)TextButton(onPressed:all,child:const Text('See all',style:TextStyle(fontSize:12))),
-  ]));
+  Widget heading(String title)=>Padding(padding:const EdgeInsets.symmetric(horizontal:16,vertical:8),
+    child:Text(title,style:const TextStyle(fontSize:19,fontWeight:FontWeight.w700)));
+  List<Movie> get continued=>library.recent.where((m)=>category=='Home'||
+    (category=='Movies'&&!m.episodic)||(category=='TV Series'&&m.type=='Series')||
+    (category=='Anime'&&m.type=='Anime')||(category=='Pinoy'&&
+      [...?shelves['pinoy'],...?shelves['series_pinoy']].any((title)=>m.id==title.id||m.id.startsWith('${title.id}:s')))).toList();
   Widget shelf(String title,List<Movie> items)=>Padding(padding:const EdgeInsets.only(bottom:18),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-    heading(title,all:()=>seeAll(title,items)),
+    heading(title),
     const SizedBox(height:5),
     LayoutBuilder(builder:(ctx,box){
       final width=(box.maxWidth/3.35).clamp(92.0,142.0).toDouble();
@@ -272,9 +268,9 @@ class _MobileHomeState extends State<MobileHome>{
     }),
   ]));
   Widget resumeShelf(){
-    final items=library.recent;
+    final items=continued;
     return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      heading('Continue watching',all:(){setState(()=>tab=3);}),
+      heading('Continue watching'),
       const SizedBox(height:6),
       SizedBox(height:130,child:ListView.separated(scrollDirection:Axis.horizontal,padding:const EdgeInsets.symmetric(horizontal:16),
         itemCount:items.length,separatorBuilder:(_,__)=>const SizedBox(width:10),itemBuilder:(_,i){
@@ -294,11 +290,10 @@ class _MobileHomeState extends State<MobileHome>{
   Widget home(){
     final featured=unique(rows.keys.expand((k)=>shelves[k]??[]),limit:4);
     return RefreshIndicator(onRefresh:refresh,child:CustomScrollView(key:const PageStorageKey('mobile-home'),controller:homeScroll,physics:const AlwaysScrollableScrollPhysics(),slivers:[
-      SliverToBoxAdapter(child:chips(categories,category,setCategory)),
       if(featured.isNotEmpty)SliverToBoxAdapter(child:_Featured(key:PageStorageKey('$category:${platform.key}'),movies:featured,onOpen:open)),
       if(busy)const SliverToBoxAdapter(child:LinearProgressIndicator(minHeight:2)),
-      SliverToBoxAdapter(child:platforms()),
-      if(library.recent.isNotEmpty)SliverToBoxAdapter(child:resumeShelf()),
+      if(category=='Home')SliverToBoxAdapter(child:platforms()),
+      if(continued.isNotEmpty)SliverToBoxAdapter(child:resumeShelf()),
       if(filtered)SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.fromLTRB(16,4,16,12),child:Row(children:[
         Expanded(child:Text('Explore ${platform.name}',style:const TextStyle(fontSize:20,fontWeight:FontWeight.w700))),
         TextButton(onPressed:()=>selectPlatform(PlatformBrand.all),child:const Text('Clear')),
@@ -318,7 +313,7 @@ class _MobileHomeState extends State<MobileHome>{
       focusNode:searchFocus,controller:query,onChanged:search,onSubmitted:(_)=>rememberSearch(),textInputAction:TextInputAction.search,
       decoration:InputDecoration(prefixIcon:const Icon(Icons.search),hintText:'Movies, series, anime…',
         suffixIcon:IconButton(tooltip:'Clear search',onPressed:(){query.clear();search('');},icon:const Icon(Icons.close))))),
-    chips(categories.take(4).toList(),searchCategory,(v)=>setState(()=>searchCategory=v)),
+    chips(const ['All','Movies','TV Series','Anime'],searchCategory,(v)=>setState(()=>searchCategory=v)),
     if(query.text.trim().isEmpty&&recent.isNotEmpty)Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:Wrap(spacing:8,children:[
       for(final value in recent.take(4))ActionChip(label:Text(value,maxLines:1,overflow:TextOverflow.ellipsis),onPressed:(){query.text=value;search(value);}),
     ])),
@@ -327,63 +322,81 @@ class _MobileHomeState extends State<MobileHome>{
     Expanded(child:searchItems.isEmpty?MobileEmpty(searching?'Searching…':'No titles found',
       searchFailed?'Search unavailable. Try again.':'Try another title or category.'):MobileGrid(movies:searchItems,engine:engine,onOpen:open,controller:searchScroll)),
   ]);
-  Widget browse()=>CustomScrollView(key:const PageStorageKey('mobile-browse'),controller:browseScroll,slivers:[
-    const SliverToBoxAdapter(child:Padding(padding:EdgeInsets.all(16),child:Text('Browse by category',style:TextStyle(fontSize:22,fontWeight:FontWeight.w700)))),
-    SliverPadding(padding:const EdgeInsets.symmetric(horizontal:16),sliver:SliverGrid(
-      gridDelegate:const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent:220,mainAxisExtent:74,crossAxisSpacing:10,mainAxisSpacing:10),
-      delegate:SliverChildListDelegate([
-        for(final name in categories.skip(1))OutlinedButton(onPressed:()=>setCategory(name),child:Text(name)),
-        for(final genre in ['Action','Horror','Sci-fi','Korean movies'])OutlinedButton(onPressed:()async{
-          final key=switch(genre){'Action'=>'action','Horror'=>'horror','Sci-fi'=>'scifi',_=>'korean'};
-          try{final items=await engine.catalog(key);if(mounted)seeAll(genre,items);}catch(_){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Collection unavailable.')));}
-        },child:Text(genre)),
-      ]))),
-    const SliverToBoxAdapter(child:SizedBox(height:24)),
-    SliverToBoxAdapter(child:platforms()),
-  ]);
-  Widget myList()=>CustomScrollView(key:const PageStorageKey('mobile-library'),controller:libraryScroll,slivers:[
-    if(library.recent.isNotEmpty)SliverToBoxAdapter(child:resumeShelf()),
-    SliverToBoxAdapter(child:heading('Saved titles')),
-    if(library.saved.isEmpty)const SliverToBoxAdapter(child:MobileEmpty('Your list is empty','Save a title from its details page to find it here.')),
-    SliverPadding(padding:const EdgeInsets.all(16),sliver:SliverGrid(
-      gridDelegate:const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent:150,childAspectRatio:.60,crossAxisSpacing:10,mainAxisSpacing:12),
-      delegate:SliverChildBuilderDelegate((ctx,i){
-        final m=library.saved.values.elementAt(i);
-        return MobilePoster(movie:m,engine:engine,onTap:()=>open(m));
-      },childCount:library.saved.length))),
-  ]);
+  static const navIcons=<String,IconData>{
+    'Home':Icons.home_outlined,
+    'Movies':Icons.movie_outlined,
+    'TV Series':Icons.tv_outlined,
+    'Anime':Icons.animation,
+    'Pinoy':Icons.public,
+  };
+  Widget navItem(String label){
+    final active=tab==0&&category==label;
+    final color=active?CinemaColors.accent:CinemaColors.muted;
+    return Semantics(
+      selected:active,button:true,label:label,
+      child:InkWell(
+        key:ValueKey('mobile-nav-$label'),onTap:()=>setCategory(label),
+        borderRadius:BorderRadius.circular(12),
+        child:ConstrainedBox(constraints:const BoxConstraints(minHeight:54,minWidth:48),
+          child:Padding(padding:const EdgeInsets.symmetric(vertical:5,horizontal:2),
+            child:Column(mainAxisSize:MainAxisSize.min,mainAxisAlignment:MainAxisAlignment.center,children:[
+              AnimatedContainer(
+                duration:MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:160),
+                padding:const EdgeInsets.symmetric(horizontal:12,vertical:3),
+                decoration:BoxDecoration(
+                  color:active?const Color(0x22F3A369):Colors.transparent,
+                  borderRadius:BorderRadius.circular(16)),
+                child:Icon(navIcons[label],size:22,color:color)),
+              const SizedBox(height:2),
+              Text(label,maxLines:1,overflow:TextOverflow.ellipsis,textAlign:TextAlign.center,
+                style:TextStyle(fontSize:10,color:color,fontWeight:active?FontWeight.w600:FontWeight.w400)),
+            ])))));
+  }
+  Widget bottomNav()=>Material(
+    key:const ValueKey('mobile-bottom-nav'),
+    color:CinemaColors.canvas,
+    child:SafeArea(top:false,child:DecoratedBox(
+      decoration:const BoxDecoration(border:Border(top:BorderSide(color:Color(0x1FFFFFFF)))),
+      child:Padding(padding:const EdgeInsets.fromLTRB(4,3,4,3),child:Row(children:[
+        for(final label in categories)Expanded(child:navItem(label)),
+      ])))));
+  Widget sideNav()=>Material(
+    key:const ValueKey('mobile-side-nav'),
+    color:CinemaColors.canvas,
+    child:Container(width:76,decoration:const BoxDecoration(
+      border:Border(right:BorderSide(color:Color(0x1FFFFFFF)))),
+      child:ListView(padding:const EdgeInsets.symmetric(horizontal:4,vertical:4),children:[
+        for(final label in categories)navItem(label),
+      ])));
+  void showSearch(){
+    if(tab==1){searchFocus.requestFocus();return;}
+    setState(()=>tab=1);
+    WidgetsBinding.instance.addPostFrameCallback((_){
+      if(mounted&&tab==1)searchFocus.requestFocus();
+    });
+  }
   @override Widget build(BuildContext context){
-    final size=MediaQuery.sizeOf(context);
-    final landscape=size.width>size.height&&size.height>=300;
-    final page=switch(tab){1=>searchPage(),2=>browse(),3=>myList(),_=>home()};
-    final destinations=const [
-      NavigationDestination(icon:Icon(Icons.home_outlined),selectedIcon:Icon(Icons.home),label:'Home'),
-      NavigationDestination(icon:Icon(Icons.search),label:'Search'),
-      NavigationDestination(icon:Icon(Icons.grid_view_outlined),label:'Browse'),
-      NavigationDestination(icon:Icon(Icons.bookmark_border),selectedIcon:Icon(Icons.bookmark),label:'My List'),
-    ];
-    void changeTab(int i){
-      FocusManager.instance.primaryFocus?.unfocus();
-      setState(()=>tab=i);
-    }
+    final page=tab==1?searchPage():home();
+    final landscape=MediaQuery.orientationOf(context)==Orientation.landscape;
+    final keyboard=MediaQuery.viewInsetsOf(context).bottom>0;
     final content=Column(children:[
       Padding(padding:const EdgeInsets.fromLTRB(16,2,8,2),child:Row(children:[
-        Expanded(child:tab==0?const Text.rich(TextSpan(style:TextStyle(fontSize:27,fontWeight:FontWeight.w800,letterSpacing:-1),children:[
+        const Expanded(child:Text.rich(TextSpan(style:TextStyle(fontSize:26,fontWeight:FontWeight.w800,letterSpacing:-1),children:[
           TextSpan(text:'isme'),TextSpan(text:'.',style:TextStyle(color:CinemaColors.accent)),TextSpan(text:'gg'),
-        ])):Text(['Home','Search','Browse','My List'][tab],style:const TextStyle(fontSize:24,fontWeight:FontWeight.w700))),
-        IconButton(tooltip:'Settings',onPressed:settings,icon:const Icon(Icons.settings_outlined)),
+        ]))),
+        IconButton(key:const ValueKey('mobile-nav-Search'),tooltip:'Search',
+          onPressed:showSearch,icon:const Icon(Icons.search_rounded),
+          color:tab==1?CinemaColors.accent:CinemaColors.ink),
+        IconButton(tooltip:'Menu',onPressed:settings,icon:const Icon(Icons.more_vert)),
       ])),
       Expanded(child:PageStorage(bucket:pageStorage,child:KeyedSubtree(key:ValueKey(tab),child:page))),
     ]);
     return Scaffold(
-      body:SafeArea(child:landscape?Row(children:[
-        NavigationRail(selectedIndex:tab,onDestinationSelected:changeTab,backgroundColor:CinemaColors.canvas,labelType:NavigationRailLabelType.all,
-          destinations:[for(final d in destinations)NavigationRailDestination(icon:d.icon,selectedIcon:d.selectedIcon,label:Text(d.label))]),
+      body:SafeArea(bottom:landscape||keyboard,child:Row(children:[
+        if(landscape&&!keyboard)sideNav(),
         Expanded(child:content),
-      ]):content),
-      bottomNavigationBar:landscape||MediaQuery.viewInsetsOf(context).bottom>0?null:NavigationBar(
-        selectedIndex:tab,onDestinationSelected:changeTab,height:66,backgroundColor:CinemaColors.canvas,
-        indicatorColor:const Color(0x333F3124),destinations:destinations),
+      ])),
+      bottomNavigationBar:landscape||keyboard?null:bottomNav(),
     );
   }
 }
