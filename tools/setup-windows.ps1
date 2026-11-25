@@ -1,6 +1,7 @@
 param(
     [string]$Avd = 'ismegg_TV_API_36',
-    [switch]$SkipPull
+    [switch]$SkipPull,
+    [switch]$ReuseEmulator
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
@@ -84,20 +85,41 @@ try {
         throw "AVD '$Avd' not found. Create it in Android Studio or pass -Avd NAME."
     }
 
-    Write-Host '[3/5] Starting or reusing Android TV emulator...' -ForegroundColor Cyan
+    Write-Host '[3/5] Cold-booting Android TV emulator...' -ForegroundColor Cyan
     $serial = Find-AvdSerial $adb $Avd
-    if (-not $serial) {
-        # Avoid duplicate launches when the AVD is already starting but ADB is offline.
-        $escaped = [regex]::Escape($Avd)
-        $running = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    $escaped = [regex]::Escape($Avd)
+    function Get-MatchingEmulator {
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
             Where-Object {
                 $_.Name -match '^(emulator|qemu-system-.+)\.exe$' -and
                 $_.CommandLine -match "(?i)(?:-avd\s+|@|\\avd\\)\x22?$escaped(?:\x22|\s|\.avd|$)"
-            })
-        if ($running.Count -eq 0) {
-            Start-Process -FilePath $emulator -ArgumentList @('-avd', $Avd)
-        } else {
+            }
+    }
+    if ($serial -and -not $ReuseEmulator) {
+        Write-Host "Stopping $Avd ($serial) before cold boot..."
+        Invoke-Checked $adb @('-s', $serial, 'emu', 'kill')
+        $deadline = (Get-Date).AddSeconds(45)
+        do {
+            Start-Sleep -Seconds 1
+            $devices = @(& $adb devices 2>$null)
+            $stillConnected = @($devices | Where-Object { $_ -match "^$serial\s" }).Count -gt 0
+            $running = @(Get-MatchingEmulator)
+        } while (($stillConnected -or $running.Count -gt 0) -and (Get-Date) -lt $deadline)
+        if ($stillConnected -or $running.Count -gt 0) {
+            throw "The emulator did not exit. Close $Avd manually and rerun."
+        }
+        $serial = $null
+    }
+    if (-not $serial) {
+        $running = @(Get-MatchingEmulator)
+        if ($running.Count -gt 0) {
+            if (-not $ReuseEmulator) {
+                throw "The target emulator is running but is not reachable through ADB. Close $Avd manually and rerun."
+            }
             Write-Host 'Matching emulator is already starting.'
+        } else {
+            Write-Host 'Starting without loading a saved snapshot...'
+            Start-Process -FilePath $emulator -ArgumentList @('-avd', $Avd, '-no-snapshot-load')
         }
         $deadline = (Get-Date).AddMinutes(5)
         do {
@@ -105,6 +127,8 @@ try {
             $serial = Find-AvdSerial $adb $Avd
         } until ($serial -or (Get-Date) -ge $deadline)
         if (-not $serial) { throw 'Emulator did not connect to ADB within five minutes.' }
+    } else {
+        Write-Host "Reusing $Avd ($serial)."
     }
     $deadline = (Get-Date).AddMinutes(5)
     do {
