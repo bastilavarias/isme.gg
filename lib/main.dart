@@ -309,7 +309,7 @@ class _CinemaHomeState extends State<CinemaHome> {
   Widget navButton(String label,FocusNode node,bool active,VoidCallback action)=>TextButton(
     focusNode:node,onFocusChange:(focused){if(focused&&!searching)scrollTop();},
     onPressed:action,style:TextButton.styleFrom(backgroundColor:active?const Color(0x33444444):Colors.transparent,
-      foregroundColor:active?CinemaColors.accent:CinemaColors.ink,padding:const EdgeInsets.symmetric(horizontal:engine.tv?12:9,vertical:12)),
+      foregroundColor:active?CinemaColors.accent:CinemaColors.ink,padding:EdgeInsets.symmetric(horizontal:engine.tv?12:9,vertical:12)),
     child:Text(label));
   Widget buildSearch(bool tv)=>CinemaSearchPage(key:searchPageKey,engine:engine,controller:search,
     movies:search.text.trim().isEmpty?popularMovies:results,busy:searchBusy||(search.text.trim().isEmpty&&loading),
