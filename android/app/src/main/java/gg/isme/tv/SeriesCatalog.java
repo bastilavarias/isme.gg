@@ -33,7 +33,7 @@ final class SeriesCatalog {
         String country=m.optString("country","").toLowerCase(java.util.Locale.ROOT);
         return animation&&(country.contains("japan")||country.equals("jp"));
     }
-    private static JSONArray tmdbRows(JSONArray raw,boolean animeOnly)throws Exception{
+    static JSONArray tmdbRows(JSONArray raw,boolean animeOnly)throws Exception{
         JSONArray items=new JSONArray();
         if(raw==null)throw new IOException("Invalid TV catalog response");
         for(int i=0;i<raw.length()&&items.length()<50;i++){
@@ -69,8 +69,8 @@ final class SeriesCatalog {
         return items;
     }
     JSONObject catalog(String collection,String query,String mode,String token)throws Exception{
-        if(!collection.matches("series|series_rated|anime|anime_rated"))throw new IllegalArgumentException("Invalid TV collection");
-        boolean search=!query.isEmpty(),anime=collection.startsWith("anime");
+        if(!collection.matches("series|series_rated|series_pinoy|anime|anime_rated"))throw new IllegalArgumentException("Invalid TV collection");
+        boolean search=!query.isEmpty(),anime=collection.startsWith("anime"),pinoy="series_pinoy".equals(collection);
         String key=collection;
         CatalogCache.Entry saved=search?null:cache.read("tv_catalog",key);
         boolean usable=saved!=null&&saved.fresh(30*CatalogCache.DAY);
@@ -84,11 +84,11 @@ final class SeriesCatalog {
                 try{
                     String path=search?"/search/tv?include_adult=false&query="+MediaCatalog.encode(query):
                         "/discover/tv?include_adult=false&sort_by="+(collection.endsWith("rated")?"vote_average.desc&vote_count.gte=100":"popularity.desc")+
-                        (anime?"&with_genres=16&with_origin_country=JP":"");
+                        (anime?"&with_genres=16&with_origin_country=JP":pinoy?"&with_origin_country=PH":"");
                     items=tmdbRows(WatchProviders.get(path,token).optJSONArray("results"),anime);
                     source="tmdb";
-                }catch(Exception e){items=cinemetaRows(collection,query);}
-            }else items=cinemetaRows(collection,query);
+                }catch(Exception e){if(pinoy)throw e;items=cinemetaRows(collection,query);}
+            }else items=pinoy?new JSONArray():cinemetaRows(collection,query);
             if(items.length()==0&&usable)return saved.data.put("cacheHit",true).put("stale",true);
             JSONObject value=new JSONObject().put("items",items).put("source",source);
             if(!search&&items.length()>0)cache.write("tv_catalog",key,value);
@@ -99,7 +99,7 @@ final class SeriesCatalog {
         }
     }
     private JSONObject cinemeta(String id)throws Exception{
-        if(!id.startsWith("imdb:"))throw new IOException("TMDB read token required for this title");
+        if(!id.startsWith("imdb:"))id="imdb:"+imdbId(id,"");
         CatalogCache.Entry entry=cache.read("episodes",id+":meta");
         if(entry!=null&&entry.fresh(7*CatalogCache.DAY))return entry.data;
         try{

@@ -38,6 +38,14 @@ public final class MainActivity extends FlutterActivity {
                         info.put("origin", cinema.url()); info.put("token", cinema.token()); info.put("tv", tv);
                         result.success(info);
                     } catch (Exception e) { result.error("ENGINE", "Could not start local playback engine", null); }
+                } else if ("readMetadataCredential".equals(call.method)) {
+                    result.success(MetadataCredential.read(this));
+                } else if ("saveMetadataCredential".equals(call.method)) {
+                    try{
+                        String credential=call.argument("token");
+                        MetadataCredential.save(this,credential==null?"":credential);
+                        result.success(null);
+                    }catch(Exception e){result.error("CREDENTIAL","Could not save metadata credential",null);}
                 } else if ("audioDiagnostics".equals(call.method)) {
                     android.media.AudioManager audio = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
                     Map<String,Object> data = new HashMap<>();

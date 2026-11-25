@@ -45,6 +45,15 @@ class CatalogSnapshot {
       .where((m)=>m.id.isNotEmpty&&m.title.isNotEmpty).toList(),
     cacheHit:data['cacheHit']==true,stale:data['stale']==true);
 }
+class WatchProvider {
+  final int id;
+  final String name,logo;
+  final bool movie,tv;
+  const WatchProvider({required this.id,required this.name,this.logo='',this.movie=false,this.tv=false});
+  factory WatchProvider.fromJson(Map<String,dynamic> j)=>WatchProvider(
+    id:(j['id'] as num?)?.toInt()??0,name:j['name']?.toString()??'',logo:j['logo']?.toString()??'',
+    movie:j['movie']==true,tv:j['tv']==true);
+}
 class NativeEngine {
   static const channel = MethodChannel('gg.isme/native');
   final http.Client _client = http.Client();
@@ -59,6 +68,17 @@ class NativeEngine {
   int _providerLane=0;
   bool _disposed=false, _providerBlocked=false;
   bool get providersConfigured=>_providerToken.isNotEmpty;
+  Future<void> restoreMetadataCredential() async {
+    try{_providerToken=(await channel.invokeMethod<String>('readMetadataCredential')??'').trim();}catch(_){}
+  }
+  Future<void> rememberMetadataCredential(String token) async {
+    await channel.invokeMethod<void>('saveMetadataCredential',{'token':token.trim()});
+  }
+  Future<void> configureMetadata(String country,String? token) async {
+    final value=token??_providerToken;
+    configureProviders(country,value);
+    if(token!=null)await rememberMetadataCredential(value);
+  }
   void configureProviders(String country,String token){
     providerCountry=country.toUpperCase();
     _providerToken=token.trim();
@@ -67,7 +87,7 @@ class NativeEngine {
     providerRevision.value++;
   }
   Future<String?> providerFor(Movie movie){
-    if(_disposed||!(RegExp(r'^imdb:tt[0-9]{7,10}$').hasMatch(movie.id)||(movie.episodic&&movie.tmdbId>0)))return Future.value(null);
+    if(_disposed||!(RegExp(r'^imdb:tt[0-9]{7,10}$').hasMatch(movie.id)||(movie.tmdbId>0&&(movie.id.startsWith('tmdb:tv:')||movie.id.startsWith('tmdb:movie:')))))return Future.value(null);
     final old=_providerMemo[movie.id];
     if(old!=null&&DateTime.now().isBefore(old.until))return old.value;
     final revision=providerRevision.value, country=providerCountry, token=_providerToken;
@@ -118,6 +138,24 @@ class NativeEngine {
         'collection':collection,'query':query,'mode':mode,'token':_providerToken}));
     }
     return CatalogSnapshot.fromJson(await json('/api/catalog',query:{'collection':collection,'query':query,'mode':mode}));
+  }
+  Future<List<WatchProvider>> watchPlatforms({String mode='normal',bool artworkOnly=false}) async {
+    final data=await json('/api/platforms',body:{'country':artworkOnly?'GLOBAL':providerCountry,'token':_providerToken,'mode':mode});
+    return (data['providers'] as List? ?? []).whereType<Map<String,dynamic>>().map(WatchProvider.fromJson)
+      .where((p)=>p.id>0&&p.name.isNotEmpty).toList();
+  }
+  Future<CatalogSnapshot> platformCatalog(List<int> ids,String kind,String row,{String mode='normal'}) async {
+    if(ids.isEmpty)return const CatalogSnapshot([],cacheHit:false,stale:false);
+    final sorted=ids.toSet().toList()..sort();
+    return CatalogSnapshot.fromJson(await json('/api/platform/catalog',body:{
+      'country':providerCountry,'token':_providerToken,'ids':sorted.join('|'),'kind':kind,'row':row,'mode':mode}));
+  }
+  Future<Movie> identifyMovie(Movie movie) async {
+    if(movie.episodic||!movie.id.startsWith('tmdb:movie:'))return movie;
+    final data=await json('/api/platform/movie-id',body:{'tmdbId':movie.tmdbId,'token':_providerToken});
+    final imdb=data['imdb']?.toString()??'';
+    if(!RegExp(r'^tt[0-9]{7,10}$').hasMatch(imdb))throw StateError('Movie identity unavailable');
+    return Movie.fromJson({...movie.toJson(),'id':'imdb:$imdb'});
   }
   Future<List<Season>> seasons(Movie show) async {
     final data=await json('/api/tv/seasons',body:{'id':show.id,'token':_providerToken});

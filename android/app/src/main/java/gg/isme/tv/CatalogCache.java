@@ -48,7 +48,7 @@ final class CatalogCache extends SQLiteOpenHelper {
 
     synchronized void write(String kind, String key, JSONObject data) {
         try {
-            boolean catalog = "catalog".equals(kind) || "tv_catalog".equals(kind) || "episodes".equals(kind);
+            boolean catalog = "catalog".equals(kind) || "tv_catalog".equals(kind) || "episodes".equals(kind) || "platform_catalog".equals(kind) || "platform_directory".equals(kind);
             String payload = data.toString();
             if (payload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length >
                     (catalog ? MAX_CATALOG_BYTES : MAX_PROVIDER_BYTES)) return;
@@ -63,7 +63,7 @@ final class CatalogCache extends SQLiteOpenHelper {
                     new Object[]{kind,System.currentTimeMillis()-(catalog?30*DAY:7*DAY)});
                 db.execSQL("DELETE FROM entries WHERE kind=? AND cache_key NOT IN "
                     +"(SELECT cache_key FROM entries WHERE kind=? ORDER BY updated DESC,cache_key LIMIT ?)",
-                    new Object[]{kind,kind,"episodes".equals(kind)?24:catalog?12:300});
+                    new Object[]{kind,kind,"episodes".equals(kind)||"platform_catalog".equals(kind)?24:"platform_directory".equals(kind)?4:catalog?12:300});
                 db.setTransactionSuccessful();
             } finally { db.endTransaction(); }
         } catch (Exception ignored) {

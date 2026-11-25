@@ -33,6 +33,7 @@ final class LocalCinemaServer {
     private final CatalogCache metadata;
     private final WatchProviders providers;
     private final SeriesCatalog series;
+    private final PlatformCatalog platforms;
     private final SubtitleSupport subtitles = new SubtitleSupport();
     private final ExecutorService workers = Executors.newFixedThreadPool(8);
     private final ServerSocket listener;
@@ -47,6 +48,7 @@ final class LocalCinemaServer {
         this.metadata = new CatalogCache(this.context);
         this.providers = new WatchProviders(metadata);
         this.series = new SeriesCatalog(metadata);
+        this.platforms = new PlatformCatalog(metadata);
         listener = new ServerSocket();
         // Fixed only in explicit debug mode so Windows adb forward can access the
         // on-device torrent API without rebuilding the APK for Vite changes.
@@ -156,6 +158,19 @@ final class LocalCinemaServer {
             if (path.equals("/api/tv/episodes") && method.equals("POST")) {
                 JSONObject body = new JSONObject(new String(data, StandardCharsets.UTF_8));
                 sendJson(out,200,series.episodes(body.optString("id"),body.optInt("season",-1),body.optString("token","")));return;
+            }
+            if(path.equals("/api/platforms")&&method.equals("POST")){
+                JSONObject body=new JSONObject(new String(data,StandardCharsets.UTF_8));
+                sendJson(out,200,platforms.directory(body.optString("country","PH"),body.optString("token",""),body.optString("mode","normal")));return;
+            }
+            if(path.equals("/api/platform/catalog")&&method.equals("POST")){
+                JSONObject body=new JSONObject(new String(data,StandardCharsets.UTF_8));
+                sendJson(out,200,platforms.discover(body.optString("country","PH"),body.optString("ids",""),
+                    body.optString("kind","movie"),body.optString("row","popular"),body.optString("mode","normal"),body.optString("token","")));return;
+            }
+            if(path.equals("/api/platform/movie-id")&&method.equals("POST")){
+                JSONObject body=new JSONObject(new String(data,StandardCharsets.UTF_8));
+                sendJson(out,200,new JSONObject().put("imdb",platforms.movieImdb(body.optInt("tmdbId",0),body.optString("token",""))));return;
             }
             if (path.equals("/api/status") && method.equals("GET")) {
                 sendJson(out, 200, torrents.state()); return;
