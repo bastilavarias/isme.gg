@@ -8,6 +8,7 @@ import 'engine.dart';
 import 'player.dart';
 import 'platform_pill.dart';
 import 'search_page.dart';
+import 'series_page.dart';
 
 void main(){ WidgetsFlutterBinding.ensureInitialized(); PaintingBinding.instance.imageCache.maximumSizeBytes=48*1024*1024; PaintingBinding.instance.imageCache.maximumSize=120; runApp(const IsmeApp()); }
 class IsmeApp extends StatefulWidget {
@@ -39,18 +40,27 @@ class CinemaHome extends StatefulWidget {
   @override State<CinemaHome> createState()=>_CinemaHomeState();
 }
 class _CinemaHomeState extends State<CinemaHome> {
-  static const collections={'trending':'Trending now','pinoy':'Filipino movies','korean':'Korean movies','english':'English movies','action':'Action','horror':'Horror'};
+  static const movieCollections={'trending':'Trending now','pinoy':'Filipino movies','korean':'Korean movies','english':'English movies','action':'Action','horror':'Horror'};
+  static const seriesCollections={'series':'Popular series','series_rated':'Top rated series'};
+  static const animeCollections={'anime':'Popular anime','anime_rated':'Top rated anime'};
+  String section='Home';
+  Map<String,String> get collections=>switch(section){
+    'Home'=>{...movieCollections,'series':'Popular series','anime':'Popular anime'},'Series'=>seriesCollections,'Anime'=>animeCollections,_=>movieCollections,
+  };
+  List<Movie> get continued=>widget.history.movies().where((m)=>section=='Home'||(section=='Movies'&&!m.episodic)||(section=='Series'&&m.type=='Series')||(section=='Anime'&&m.type=='Anime')).toList();
   final shelves=<String,List<Movie>>{}, failures=<String,String>{};
   final selected=ValueNotifier<Movie?>(null);
   final search=TextEditingController();
   final homeScroll=ScrollController();
   final homeNav=FocusNode(debugLabel:'Home'), searchNav=FocusNode(debugLabel:'Search'),
     menuNav=FocusNode(debugLabel:'Menu'), heroFocus=FocusNode(debugLabel:'Hero watch');
+  final movieNav=FocusNode(debugLabel:'Movies'),seriesNav=FocusNode(debugLabel:'Series'),animeNav=FocusNode(debugLabel:'Anime');
+  FocusNode get sectionNav=>switch(section){'Movies'=>movieNav,'Series'=>seriesNav,'Anime'=>animeNav,_=>homeNav};
   final rowKeys=<String,GlobalKey<CinemaShelfState>>{};
   final menuAnchor=GlobalKey();
   final searchPageKey=GlobalKey<CinemaSearchPageState>();
   List<String> get visibleRows=>[
-    if(widget.history.movies().isNotEmpty)'Continue watching',
+    if(continued.isNotEmpty)'Continue watching',
     for(final entry in collections.entries)if(shelves[entry.key]?.isNotEmpty==true)entry.value,
   ];
   Duration get motion=>MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:300);
@@ -74,7 +84,7 @@ class _CinemaHomeState extends State<CinemaHome> {
   void focusHero(){
     scrollTop();
     if(heroFocus.context!=null){heroFocus.requestFocus();}
-    else{homeNav.requestFocus();}
+    else{sectionNav.requestFocus();}
   }
   KeyEventResult navKeys(FocusNode node,KeyEvent event){
     if(!engine.tv||event is! KeyDownEvent&&event is! KeyRepeatEvent)return KeyEventResult.ignored;
@@ -85,15 +95,15 @@ class _CinemaHomeState extends State<CinemaHome> {
       return KeyEventResult.handled;
     }
     if(key==LogicalKeyboardKey.arrowLeft||key==LogicalKeyboardKey.arrowRight){
-      final nodes=[homeNav,searchNav,menuNav];
+      final nodes=[homeNav,movieNav,seriesNav,animeNav,searchNav,menuNav];
       final current=nodes.indexWhere((n)=>n.hasFocus);
-      if(current>=0){nodes[(current+(key==LogicalKeyboardKey.arrowRight?1:-1)).clamp(0,2).toInt()].requestFocus();return KeyEventResult.handled;}
+      if(current>=0){nodes[(current+(key==LogicalKeyboardKey.arrowRight?1:-1)).clamp(0,nodes.length-1).toInt()].requestFocus();return KeyEventResult.handled;}
     }
     return KeyEventResult.ignored;
   }
   KeyEventResult heroKeys(FocusNode node,KeyEvent event){
     if(!engine.tv||event is! KeyDownEvent&&event is! KeyRepeatEvent)return KeyEventResult.ignored;
-    if(event.logicalKey==LogicalKeyboardKey.arrowUp){homeNav.requestFocus();scrollTop();return KeyEventResult.handled;}
+    if(event.logicalKey==LogicalKeyboardKey.arrowUp){sectionNav.requestFocus();scrollTop();return KeyEventResult.handled;}
     if(event.logicalKey==LogicalKeyboardKey.arrowDown){
       final rows=visibleRows;if(rows.isNotEmpty)rowKeys[rows.first]?.currentState?.focusRemembered();
       return KeyEventResult.handled;
@@ -105,6 +115,7 @@ class _CinemaHomeState extends State<CinemaHome> {
   @override void initState(){super.initState();load();}
   Future<void> load({bool force=false}) async {
     final run=++catalogGeneration;
+    final requested=Map<String,String>.of(collections);
     bool current()=>mounted&&run==catalogGeneration;
     void apply(String key,List<Movie> items){
       if(!current()||items.isEmpty)return;
@@ -114,8 +125,8 @@ class _CinemaHomeState extends State<CinemaHome> {
       setState(()=>shelves[key]=items);
       if(selected.value==null&&items.isNotEmpty)selected.value=items.first;
     }
-    setState((){loading=shelves.isEmpty;failures.clear();});
-    await Future.wait(collections.keys.map((key) async {
+    setState((){loading=!requested.keys.any((key)=>shelves[key]?.isNotEmpty==true);failures.clear();});
+    await Future.wait(requested.keys.map((key) async {
       CatalogSnapshot? cached;
       try{
         cached=await engine.catalogSnapshot(key,mode:'cached');
@@ -127,6 +138,7 @@ class _CinemaHomeState extends State<CinemaHome> {
         final live=await engine.catalogSnapshot(key,mode:force?'refresh':'normal');
         if(!current())return;
         apply(key,live.movies);
+        if(live.movies.isEmpty&&current()&&shelves[key]?.isNotEmpty!=true)setState(()=>failures[key]='No titles available');
       }catch(_){
         if(current()&&shelves[key]?.isNotEmpty!=true)setState(()=>failures[key]='Could not load this collection');
       }
@@ -138,7 +150,7 @@ class _CinemaHomeState extends State<CinemaHome> {
     return movies.where((m)=>seen.add(m.id)).take(limit).toList();
   }
   List<Movie> get popularMovies=>uniqueMovies([
-    ...?shelves['trending'],...?shelves['pinoy'],...?shelves['korean'],...?shelves['english'],
+    ...?shelves['trending'],...?shelves['series'],...?shelves['anime'],...?shelves['pinoy'],...?shelves['korean'],...?shelves['english'],
   ],limit:30);
   List<Movie> localMatches(String text){
     final needle=text.trim().toLowerCase();
@@ -157,14 +169,27 @@ class _CinemaHomeState extends State<CinemaHome> {
     if(needle.isEmpty)return;
     debounce=Timer(const Duration(milliseconds:350),()async{
       try{
-        final items=await engine.catalog('trending',query:needle);
-        if(mounted&&n==generation)setState(()=>results=uniqueMovies([...results,...localMatches(needle),...items]));
+        bool succeeded=false;
+        await Future.wait(['trending','series'].map((collection)async{
+          try{
+            final items=await engine.catalog(collection,query:needle);
+            succeeded=true;
+            if(mounted&&n==generation)setState(()=>results=uniqueMovies([...results,...localMatches(needle),...items]));
+          }catch(_){}
+        }));
+        if(!succeeded)throw StateError('Search unavailable');
       }catch(_){if(mounted&&n==generation){
         final saved=uniqueMovies([...results,...localMatches(needle)]);
         setState((){results=saved;searchError=saved.isEmpty?'Search unavailable. Try again.':'Showing saved catalog results';});
       }}
       finally{if(mounted&&n==generation)setState(()=>searchBusy=false);}
     });
+  }
+  void showSection(String name){
+    if(!searching&&section==name){scrollTop();return;}
+    setState((){section=name;searching=false;});
+    selected.value=collections.keys.expand((k)=>shelves[k]??<Movie>[]).firstOrNull;
+    scrollTop();load();
   }
   void showSearch(){
     setState(()=>searching=true);
@@ -173,7 +198,7 @@ class _CinemaHomeState extends State<CinemaHome> {
     });
   }
   Future<void> open(Movie m) async {
-    await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>Details(movie:m,engine:engine,history:widget.history)));
+    await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>m.episodic?SeriesPage(show:m,engine:engine,history:widget.history):Details(movie:m,engine:engine,history:widget.history)));
     if(mounted)setState((){});
   }
   Future<void> manual() async {
@@ -189,19 +214,22 @@ class _CinemaHomeState extends State<CinemaHome> {
     await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:const Movie(id:'manual',title:'Media source'),engine:engine,history:widget.history,magnet:value)));
     if(mounted)setState((){});
   }
-  @override void dispose(){debounce?.cancel();search.dispose();homeScroll.dispose();selected.dispose();homeNav.dispose();searchNav.dispose();menuNav.dispose();heroFocus.dispose();super.dispose();}
+  @override void dispose(){debounce?.cancel();search.dispose();homeScroll.dispose();selected.dispose();homeNav.dispose();movieNav.dispose();seriesNav.dispose();animeNav.dispose();searchNav.dispose();menuNav.dispose();heroFocus.dispose();super.dispose();}
   @override Widget build(BuildContext context){
     final tv=engine.tv;
     final nav=Focus(canRequestFocus:false,onKeyEvent:navKeys,child:Container(
       decoration:tv?const BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Color(0xF0000000),Color(0xB0000000),Colors.transparent])):null,
       padding:EdgeInsets.symmetric(horizontal:tv?40:16,vertical:10),
       child:Stack(alignment:Alignment.center,children:[
-        const Align(alignment:Alignment.centerLeft,child:Wordmark()),
-        Row(mainAxisSize:MainAxisSize.min,children:[
-          navButton('Home',homeNav,!searching,(){setState(()=>searching=false);scrollTop();}),
-          const SizedBox(width:8),
-          navButton('Search',searchNav,searching,showSearch),
-        ]),
+        if(tv)const Align(alignment:Alignment.centerLeft,child:Wordmark()),
+        Padding(padding:EdgeInsets.symmetric(horizontal:tv?82:26),child:SingleChildScrollView(scrollDirection:Axis.horizontal,
+          child:Row(mainAxisSize:MainAxisSize.min,children:[
+            navButton('Home',homeNav,!searching&&section=='Home',()=>showSection('Home')),
+            navButton('Movies',movieNav,!searching&&section=='Movies',()=>showSection('Movies')),
+            navButton('Series',seriesNav,!searching&&section=='Series',()=>showSection('Series')),
+            navButton('Anime',animeNav,!searching&&section=='Anime',()=>showSection('Anime')),
+            navButton('Search',searchNav,searching,showSearch),
+          ]))),
         Align(alignment:Alignment.centerRight,child:IconButton(key:menuAnchor,focusNode:menuNav,tooltip:'Menu',onPressed:openNavMenu,icon:const Icon(Icons.more_vert)))
       ])));
     return Scaffold(body:SafeArea(child:Shortcuts(shortcuts:const {
@@ -226,7 +254,7 @@ class _CinemaHomeState extends State<CinemaHome> {
       items:const [
         PopupMenuItem(value:'source',child:Text('Open source')),
         PopupMenuItem(value:'refresh',child:Text('Refresh catalog')),
-        PopupMenuItem(value:'providers',child:Text('Streaming availability')),
+        PopupMenuItem(value:'providers',child:Text('TMDB / streaming availability')),
         PopupMenuItem(value:'update',child:Text('Check updates')),
       ]);
     if(!mounted)return;
@@ -247,7 +275,7 @@ class _CinemaHomeState extends State<CinemaHome> {
     final value=await showDialog<Map<String,String>>(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,update)=>AlertDialog(
       title:const Text('Streaming availability'),
       content:SingleChildScrollView(child:SizedBox(width:390,child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
-        const Text('Show a small badge when one subscription provider is listed in your region.'),
+        const Text('Connect TMDB for TV series, anime, episode artwork and regional streaming badges.'),
         const SizedBox(height:12),
         TextField(controller:region,maxLength:2,textCapitalization:TextCapitalization.characters,decoration:const InputDecoration(labelText:'Country code (e.g. PH, US)')),
         TextField(controller:token,obscureText:true,enableSuggestions:false,autocorrect:false,decoration:const InputDecoration(labelText:'TMDB API read access token')),
@@ -273,13 +301,15 @@ class _CinemaHomeState extends State<CinemaHome> {
     if(!mounted)return;
     engine.configureProviders(country,value['token']!);
     menuNav.requestFocus();
+    if(section=='Anime'||section=='Series'||section=='Home')await load(force:true);
+    if(mounted&&searching&&search.text.trim().isNotEmpty)query(search.text);
   }
   Widget providerCredit()=>const Padding(padding:EdgeInsets.symmetric(horizontal:16,vertical:8),
     child:Text('Streaming availability: JustWatch via TMDB',style:TextStyle(fontSize:10,color:CinemaColors.muted)));
   Widget navButton(String label,FocusNode node,bool active,VoidCallback action)=>TextButton(
     focusNode:node,onFocusChange:(focused){if(focused&&!searching)scrollTop();},
     onPressed:action,style:TextButton.styleFrom(backgroundColor:active?const Color(0x33444444):Colors.transparent,
-      foregroundColor:active?CinemaColors.accent:CinemaColors.ink,padding:const EdgeInsets.symmetric(horizontal:18,vertical:12)),
+      foregroundColor:active?CinemaColors.accent:CinemaColors.ink,padding:const EdgeInsets.symmetric(horizontal:engine.tv?12:9,vertical:12)),
     child:Text(label));
   Widget buildSearch(bool tv)=>CinemaSearchPage(key:searchPageKey,engine:engine,controller:search,
     movies:search.text.trim().isEmpty?popularMovies:results,busy:searchBusy||(search.text.trim().isEmpty&&loading),
@@ -300,7 +330,8 @@ class _CinemaHomeState extends State<CinemaHome> {
   Widget buildHome(bool tv)=>SingleChildScrollView(controller:homeScroll,child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
       ValueListenableBuilder<Movie?>(valueListenable:selected,builder:(_,m,__)=>m==null?const SizedBox(height:16):hero(m,tv)),
       if(loading)const LinearProgressIndicator(),
-      if(widget.history.movies().isNotEmpty)shelf('Continue watching',widget.history.movies(),tv),
+      if(continued.isNotEmpty)shelf('Continue watching',continued,tv),
+      if((section=='Series'||section=='Anime')&&!engine.providersConfigured)Padding(padding:const EdgeInsets.symmetric(horizontal:24),child:TextButton(onPressed:providerSettings,child:const Text('Connect TMDB for the full catalog and episode artwork'))),
       for(final entry in collections.entries)
         if(shelves[entry.key]?.isNotEmpty==true)shelf(entry.value,shelves[entry.key]!,tv)
         else if(failures.containsKey(entry.key))Padding(padding:const EdgeInsets.all(16),child:TextButton(onPressed:()=>load(force:true),child:Text('Retry ${entry.value}'))),
@@ -317,7 +348,7 @@ class _CinemaHomeState extends State<CinemaHome> {
           Text(m.title,maxLines:2,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?42:32,height:1.05,fontWeight:FontWeight.w800)),
           if(m.year.isNotEmpty)Padding(padding:const EdgeInsets.only(top:8),child:Text(m.year,style:const TextStyle(color:CinemaColors.muted))),
           if(tv)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Text(m.description,maxLines:2,overflow:TextOverflow.ellipsis)),
-          const SizedBox(height:14),Focus(canRequestFocus:false,onKeyEvent:heroKeys,child:FilledButton.icon(focusNode:heroFocus,onFocusChange:(focused){if(focused&&tv)scrollTop();},onPressed:()=>open(m),icon:const Icon(Icons.play_arrow),label:const Text('Watch')))
+          const SizedBox(height:14),Focus(canRequestFocus:false,onKeyEvent:heroKeys,child:FilledButton.icon(focusNode:heroFocus,onFocusChange:(focused){if(focused&&tv)scrollTop();},onPressed:()=>open(m),icon:const Icon(Icons.play_arrow),label:Text(m.episodic?'Episodes':'Watch')))
         ]))))))
   ]);
 }

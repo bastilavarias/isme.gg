@@ -16,10 +16,10 @@ final class WatchProviders {
     private final CatalogCache cache;
     WatchProviders(CatalogCache cache) { this.cache = cache; }
 
-    JSONObject lookup(String imdb, int tmdb, String country, String token) throws Exception {
-        if (!imdb.matches("tt[0-9]{7,10}") || !country.matches("[A-Z]{2}"))
+    JSONObject lookup(String imdb, int tmdb, String country, String token, boolean tv) throws Exception {
+        if ((tmdb<=0&&!imdb.matches("tt[0-9]{7,10}")) || !country.matches("[A-Z]{2}"))
             throw new IllegalArgumentException("Invalid movie or region");
-        String key = country + ":" + imdb;
+        String key = country + ":" + (tv?"tv:":"") + (imdb.isEmpty()?"tmdb:"+tmdb:imdb);
         CatalogCache.Entry entry = cache.read("provider", key);
         if (entry != null && entry.fresh(CatalogCache.DAY)) return entry.data;
         if (token.isEmpty()) return new JSONObject().put("provider","");
@@ -27,13 +27,13 @@ final class WatchProviders {
             throw new IllegalArgumentException("Invalid TMDB read token");
         if (tmdb <= 0 && entry != null) tmdb = entry.data.optInt("tmdbId",0);
         if (tmdb <= 0) {
-            JSONArray movies = get("/find/"+imdb+"?external_source=imdb_id",token).optJSONArray("movie_results");
+            JSONArray movies = get("/find/"+imdb+"?external_source=imdb_id",token).optJSONArray(tv?"tv_results":"movie_results");
             JSONObject movie = movies == null ? null : movies.optJSONObject(0);
             tmdb = movie == null ? 0 : movie.optInt("id",0);
         }
         String provider = "";
         if (tmdb > 0) {
-            JSONObject results = get("/movie/"+tmdb+"/watch/providers",token).optJSONObject("results");
+            JSONObject results = get((tv?"/tv/":"/movie/")+tmdb+"/watch/providers",token).optJSONObject("results");
             if (results == null) throw new IOException("Invalid provider response");
             JSONObject region = results.optJSONObject(country);
             provider = singleSubscription(region);
@@ -70,7 +70,8 @@ final class WatchProviders {
         return name.length()<=32?name:"";
     }
 
-    private static JSONObject get(String path, String token) throws Exception {
+    static JSONObject get(String path, String token) throws Exception {
+        if(token.isEmpty()||token.length()>2048||!token.matches("[A-Za-z0-9._~+/-]+=*"))throw new IOException("Valid TMDB read token required");
         HttpURLConnection c=(HttpURLConnection)new URL("https://api.themoviedb.org/3"+path).openConnection();
         c.setInstanceFollowRedirects(false);
         c.setConnectTimeout(8000);c.setReadTimeout(8000);

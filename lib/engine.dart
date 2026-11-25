@@ -8,16 +8,32 @@ class Movie {
   final String id, title, description, poster, backdrop;
   final String year, genre, runtime, rating;
   final int tmdbId;
-  const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = '', this.genre = '', this.runtime = '', this.rating = '', this.tmdbId = 0});
+  final String type;
+  bool get episodic=>type=='Series'||type=='Anime';
+  const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = '', this.genre = '', this.runtime = '', this.rating = '', this.tmdbId = 0, this.type='Movie'});
   static String _field(dynamic value) => value == null ? '' : value.toString().trim();
   static String _genre(dynamic value) => value is List ? value.take(2).map(_field).where((s)=>s.isNotEmpty).join(', ') : _field(value);
-  String get metadata => ['Movie',genre,year,runtime,rating].where((s)=>s.isNotEmpty).join(' · ');
+  String get metadata => [type,genre,year,runtime,rating].where((s)=>s.isNotEmpty).join(' · ');
   factory Movie.fromJson(Map<String, dynamic> j) => Movie(
     id: j['id']?.toString() ?? '', title: j['title']?.toString() ?? '',
     description: j['description']?.toString() ?? '', poster: j['poster']?.toString() ?? '',
-    backdrop: _field(j['backdrop']), year: _field(j['year']), genre: _genre(j['genres']??j['genre']), runtime: _field(j['runtime']), rating: _field(j['ratingLabel']), tmdbId: int.tryParse(_field(j['tmdbId']))??0);
-  Map<String, dynamic> toJson() => {'id':id,'title':title,'description':description,'poster':poster,'backdrop':backdrop,'year':year,'genre':genre,'runtime':runtime,'ratingLabel':rating,'tmdbId':tmdbId};
+    backdrop: _field(j['backdrop']), year: _field(j['year']), genre: _genre(j['genres']??j['genre']), runtime: _field(j['runtime']), rating: _field(j['ratingLabel']), tmdbId: int.tryParse(_field(j['tmdbId']))??0, type: const ['Series','Anime'].contains(j['type'])?j['type'] as String:'Movie');
+  Map<String, dynamic> toJson() => {'id':id,'title':title,'description':description,'poster':poster,'backdrop':backdrop,'year':year,'genre':genre,'runtime':runtime,'ratingLabel':rating,'tmdbId':tmdbId,'type':type};
   String get art => backdrop.isNotEmpty ? backdrop : poster;
+}
+class Season {
+  final int number;
+  final String name;
+  const Season(this.number,this.name);
+}
+class Episode {
+  final int number;
+  final String title,description,thumbnail,airDate;
+  final int runtime;
+  const Episode({required this.number,required this.title,this.description='',this.thumbnail='',this.airDate='',this.runtime=0});
+  factory Episode.fromJson(Map<String,dynamic> j)=>Episode(number:(j['number'] as num?)?.toInt()??0,
+    title:j['title']?.toString()??'',description:j['description']?.toString()??'',thumbnail:j['thumbnail']?.toString()??'',
+    airDate:j['airDate']?.toString()??'',runtime:(j['runtime'] as num?)?.toInt()??0);
 }
 class CatalogSnapshot {
   final List<Movie> movies;
@@ -50,7 +66,7 @@ class NativeEngine {
     providerRevision.value++;
   }
   Future<String?> providerFor(Movie movie){
-    if(_disposed||!RegExp(r'^imdb:tt[0-9]{7,10}$').hasMatch(movie.id))return Future.value(null);
+    if(_disposed||!(RegExp(r'^imdb:tt[0-9]{7,10}$').hasMatch(movie.id)||(movie.episodic&&movie.tmdbId>0)))return Future.value(null);
     final old=_providerMemo[movie.id];
     if(old!=null&&DateTime.now().isBefore(old.until))return old.value;
     final revision=providerRevision.value, country=providerCountry, token=_providerToken;
@@ -59,7 +75,7 @@ class NativeEngine {
       if(_disposed||revision!=providerRevision.value)return null;
       try{
         final data=await json('/api/providers',body:{
-          'imdb':movie.id.substring(5),'tmdbId':movie.tmdbId,'country':country,
+          'imdb':movie.id.startsWith('imdb:')?movie.id.substring(5):'','tmdbId':movie.tmdbId,'country':country,'tv':movie.episodic,
           'token':_providerBlocked?'':token,
         });
         if(_disposed||revision!=providerRevision.value)return null;
@@ -95,8 +111,28 @@ class NativeEngine {
     if (res.statusCode >= 400) throw StateError(data['error']?.toString() ?? 'Request failed');
     return data;
   }
-  Future<CatalogSnapshot> catalogSnapshot(String collection,{String mode='normal',String query=''}) async =>
-    CatalogSnapshot.fromJson(await json('/api/catalog',query:{'collection':collection,'query':query,'mode':mode}));
+  Future<CatalogSnapshot> catalogSnapshot(String collection,{String mode='normal',String query=''}) async {
+    if(collection.startsWith('series')||collection.startsWith('anime')){
+      return CatalogSnapshot.fromJson(await json('/api/tv/catalog',body:{
+        'collection':collection,'query':query,'mode':mode,'token':_providerToken}));
+    }
+    return CatalogSnapshot.fromJson(await json('/api/catalog',query:{'collection':collection,'query':query,'mode':mode}));
+  }
+  Future<List<Season>> seasons(Movie show) async {
+    final data=await json('/api/tv/seasons',body:{'id':show.id,'token':_providerToken});
+    final rows=(data['seasons'] as List? ?? []).whereType<Map<String,dynamic>>();
+    final seen=<int>{};
+    final result=rows.where((j)=>j['number'] is int&&(j['number'] as int)>=0&&seen.add(j['number'] as int))
+      .map((j)=>Season(j['number'] as int,j['name']?.toString()??'')).toList();
+    result.sort((a,b)=>a.number.compareTo(b.number));return result;
+  }
+  Future<List<Episode>> episodes(Movie show,int season) async {
+    final data=await json('/api/tv/episodes',body:{'id':show.id,'season':season,'token':_providerToken});
+    final seen=<int>{};
+    final result=(data['episodes'] as List? ?? []).whereType<Map<String,dynamic>>().map(Episode.fromJson)
+      .where((e)=>e.number>=0&&seen.add(e.number)).toList();
+    result.sort((a,b)=>a.number.compareTo(b.number));return result;
+  }
   Future<List<Movie>> catalog(String collection, {String query = ''}) async =>
     (await catalogSnapshot(collection,query:query)).movies;
   Future<void> start(Movie movie, {String magnet = '', int source = 0}) async {

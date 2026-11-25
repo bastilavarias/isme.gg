@@ -30,8 +30,11 @@ class CinemaSearchPageState extends State<CinemaSearchPage> {
   int lastKey=0, lastResult=0, resultColumns=3;
   double resultStride=180;
   bool nativeOpen=false;
+  int _focusRequest=0;
+  String? _pendingResult;
+  Duration get _motion=>MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:240);
 
-  void focusKeyboard(){if(mounted)keys[lastKey].requestFocus();}
+  void focusKeyboard(){_focusRequest++;_pendingResult=null;if(mounted)keys[lastKey].requestFocus();}
   void change(String value){
     widget.controller.value=TextEditingValue(text:value,selection:TextSelection.collapsed(offset:value.length));
     widget.onQuery(value);
@@ -66,21 +69,42 @@ class CinemaSearchPageState extends State<CinemaSearchPage> {
     nativeKey.requestFocus();
   }
   FocusNode resultNode(Movie m)=>resultNodes.putIfAbsent(m.id,()=>FocusNode(debugLabel:'Search result: ${m.title}'));
-  void focusResult(int index){
+  Future<void> _revealResult(int index) async {
+    if(!mounted||!scroll.hasClients)return;
+    final pos=scroll.position;
+    if(!pos.hasContentDimensions)return;
+    final top=(index~/resultColumns)*resultStride;
+    final bottom=top+resultStride-8;
+    var target=pos.pixels;
+    if(top<target)target=top;
+    else if(bottom>target+pos.viewportDimension)target=bottom-pos.viewportDimension;
+    target=target.clamp(pos.minScrollExtent,pos.maxScrollExtent).toDouble();
+    if((target-pos.pixels).abs()<1)return;
+    if(_motion==Duration.zero)pos.jumpTo(target);
+    else await pos.animateTo(target,duration:_motion,curve:Curves.easeOutCubic);
+  }
+  void focusResult(int index) async {
     if(widget.movies.isEmpty)return;
     final i=index.clamp(0,widget.movies.length-1).toInt();
     final movie=widget.movies[i],node=resultNode(movie);
+    final request=++_focusRequest;
+    _pendingResult=movie.id;
     lastResult=i;
-    if(node.context!=null){node.requestFocus();return;}
-    if(scroll.hasClients){
-      final pos=scroll.position;
-      final target=((i~/resultColumns)*resultStride).clamp(0.0,pos.maxScrollExtent).toDouble();
-      scroll.jumpTo(target);
-    }
+    if(node.context!=null){node.requestFocus();_pendingResult=null;return;}
+    await _revealResult(i);
+    if(!mounted||request!=_focusRequest)return;
     WidgetsBinding.instance.addPostFrameCallback((_){
-      if(mounted&&widget.movies.any((m)=>m.id==movie.id)&&node.context!=null)node.requestFocus();
+      if(!mounted||request!=_focusRequest)return;
+      _pendingResult=null;
+      if(widget.movies.any((m)=>m.id==movie.id)&&node.context!=null)node.requestFocus();
     });
     WidgetsBinding.instance.ensureVisualUpdate();
+  }
+  void _resultFocused(Movie movie){
+    final i=widget.movies.indexWhere((m)=>m.id==movie.id);
+    if(i<0)return;
+    lastResult=i;
+    if(widget.engine.tv)_revealResult(i);
   }
   bool pressed(KeyEvent e)=>e is KeyDownEvent||e is KeyRepeatEvent;
   KeyEventResult keyboardEvent(FocusNode _,KeyEvent e){
@@ -114,7 +138,7 @@ class CinemaSearchPageState extends State<CinemaSearchPage> {
   }
   KeyEventResult resultEvent(FocusNode _,KeyEvent e){
     if(!pressed(e))return KeyEventResult.ignored;
-    final i=widget.movies.indexWhere((m)=>resultNodes[m.id]?.hasFocus==true);
+    final i=widget.movies.indexWhere((m)=>_pendingResult!=null?m.id==_pendingResult:resultNodes[m.id]?.hasFocus==true);
     if(i<0)return KeyEventResult.ignored;
     final k=e.logicalKey;
     if(k==LogicalKeyboardKey.arrowLeft){
@@ -122,7 +146,7 @@ class CinemaSearchPageState extends State<CinemaSearchPage> {
     }else if(k==LogicalKeyboardKey.arrowRight){
       if(i%resultColumns<resultColumns-1&&i+1<widget.movies.length)focusResult(i+1);
     }else if(k==LogicalKeyboardKey.arrowUp){
-      if(i<resultColumns)widget.onNav();else focusResult(i-resultColumns);
+      if(i<resultColumns){_focusRequest++;_pendingResult=null;widget.onNav();}else focusResult(i-resultColumns);
     }else if(k==LogicalKeyboardKey.arrowDown){
       if(i+resultColumns<widget.movies.length)focusResult(i+resultColumns);
     }else return KeyEventResult.ignored;
@@ -140,6 +164,7 @@ class CinemaSearchPageState extends State<CinemaSearchPage> {
   @override void didUpdateWidget(covariant CinemaSearchPage oldWidget){
     super.didUpdateWidget(oldWidget);
     final ids=widget.movies.map((m)=>m.id).toSet();
+    if(_pendingResult!=null&&!ids.contains(_pendingResult)){_focusRequest++;_pendingResult=null;}
     final obsolete=resultNodes.keys.where((id)=>!ids.contains(id)).toList();
     if(obsolete.isNotEmpty){
       final lostFocus=obsolete.any((id)=>resultNodes[id]!.hasFocus);
@@ -186,18 +211,10 @@ class CinemaSearchPageState extends State<CinemaSearchPage> {
         ]),
       ]));
     }));
-  Widget resultCard(Movie movie,bool tv)=>RemoteTile(
-    key:ValueKey(movie.id),focusNode:tv?resultNode(movie):null,label:movie.title,
-    onFocused:()=>lastResult=widget.movies.indexWhere((m)=>m.id==movie.id),
-    onPressed:()=>widget.onOpen(movie),
-    child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-      Expanded(child:Stack(fit:StackFit.expand,children:[
-        CinemaArt(movie.poster,cacheWidth:360),
-        Positioned(top:5,left:5,child:PlatformPill(engine:widget.engine,movie:movie)),
-      ])),
-      Padding(padding:const EdgeInsets.fromLTRB(4,4,4,3),child:Text(movie.title,
-        maxLines:1,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?14:12))),
-    ]));
+  Widget resultCard(Movie movie,bool tv)=>_SearchPoster(
+    key:ValueKey(movie.id),movie:movie,engine:widget.engine,tv:tv,
+    focusNode:tv?resultNode(movie):null,onFocused:()=>_resultFocused(movie),
+    onPressed:()=>widget.onOpen(movie));
   Widget resultsPanel(bool tv)=>Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     Row(children:[
       Expanded(child:Text(widget.controller.text.trim().isEmpty?'Popular movies':'Search results',
@@ -245,5 +262,47 @@ class CinemaSearchPageState extends State<CinemaSearchPage> {
         const SizedBox(height:14),
         Expanded(child:resultsPanel(false)),
       ]));
+  }
+}
+
+/// Scale the actual poster within a fixed grid cell, so focus never reflows
+/// neighbouring results. Focus and platform metadata remain independent.
+class _SearchPoster extends StatefulWidget {
+  final Movie movie;
+  final NativeEngine engine;
+  final bool tv;
+  final FocusNode? focusNode;
+  final VoidCallback onFocused,onPressed;
+  const _SearchPoster({super.key,required this.movie,required this.engine,
+    required this.tv,required this.focusNode,required this.onFocused,required this.onPressed});
+  @override State<_SearchPoster> createState()=>_SearchPosterState();
+}
+class _SearchPosterState extends State<_SearchPoster>{
+  bool _focused=false;
+  @override Widget build(BuildContext context){
+    final movie=widget.movie;
+    final active=widget.tv&&_focused;
+    final duration=MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:220);
+    return AnimatedScale(
+      key:ValueKey('search-scale-${movie.id}'),
+      scale:widget.tv?(active?1.0:.94):1.0,duration:duration,curve:Curves.easeOutCubic,
+      child:RemoteTile(
+        label:movie.title,focusNode:widget.focusNode,
+        revealOnFocus:!widget.tv,animateFocus:true,
+        onFocused:widget.onFocused,onPressed:widget.onPressed,
+        onFocusChanged:(value){if(mounted&&_focused!=value)setState(()=>_focused=value);},
+        child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+          Expanded(child:Stack(fit:StackFit.expand,children:[
+            CinemaArt(movie.poster,cacheWidth:360),
+            Positioned(top:5,left:5,child:PlatformPill(engine:widget.engine,movie:movie)),
+          ])),
+          Padding(padding:const EdgeInsets.fromLTRB(4,4,4,3),child:AnimatedDefaultTextStyle(
+            duration:duration,curve:Curves.easeOutCubic,
+            style:TextStyle(fontFamily:'Poppins',fontSize:widget.tv?14:12,
+              fontWeight:active?FontWeight.w600:FontWeight.w400,
+              color:active?CinemaColors.ink:CinemaColors.muted),
+            child:Text(movie.title,maxLines:1,overflow:TextOverflow.ellipsis))),
+        ]),
+      ));
   }
 }
