@@ -1,7 +1,8 @@
 param(
     [string]$Avd = 'ismegg_TV_API_36',
     [switch]$SkipPull,
-    [switch]$ReuseEmulator
+    [switch]$ReuseEmulator,
+    [string]$JdkDir
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
@@ -24,6 +25,47 @@ function Find-Tool {
         }
     }
     throw "$Name not found. Install it or add it to your Windows PATH."
+}
+
+function Find-CompatibleJdk {
+    param([string]$Explicit, [string]$Flutter)
+    $candidates = @($Explicit, $env:ISME_JDK_DIR, $env:JAVA_HOME)
+    if ($Explicit) { $candidates = @($Explicit) }
+    else {
+        $java = Get-Command java.exe -ErrorAction SilentlyContinue
+        if ($java) { $candidates += (Split-Path -Parent (Split-Path -Parent $java.Source)) }
+        $roots = @()
+        if ($env:ProgramFiles) {
+            foreach ($vendor in @('Eclipse Adoptium','Microsoft','Java','Amazon Corretto','BellSoft','Zulu','Semeru')) {
+                $roots += (Join-Path $env:ProgramFiles $vendor)
+            }
+            $candidates += (Join-Path $env:ProgramFiles 'Android\Android Studio\jbr')
+        }
+        if ($env:USERPROFILE) {
+            $roots += (Join-Path $env:USERPROFILE '.jdks')
+            $roots += (Join-Path $env:USERPROFILE 'scoop\apps')
+        }
+        $sdkParent = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $Flutter))
+        $roots += $sdkParent
+        foreach ($root in $roots) {
+            if ($root -and (Test-Path -LiteralPath $root -PathType Container)) {
+                $candidates += @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -match '(?i)jdk|jbr|java|temurin|corretto|zulu' } |
+                    ForEach-Object { $_.FullName; Join-Path $_.FullName 'current' })
+            }
+        }
+    }
+    foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+        $home = $candidate.Trim('"')
+        if (-not (Test-Path -LiteralPath (Join-Path $home 'bin\javac.exe') -PathType Leaf)) { continue }
+        $release = Join-Path $home 'release'
+        if (-not (Test-Path -LiteralPath $release -PathType Leaf)) { continue }
+        $versionLine = Get-Content -LiteralPath $release | Where-Object { $_ -match '^JAVA_VERSION="' } | Select-Object -First 1
+        if ($versionLine -match '^JAVA_VERSION="(17|21)(?:\.|"|-)') {
+            return (Resolve-Path -LiteralPath $home).Path
+        }
+    }
+    throw 'JDK 17 or 21 is required for Gradle 8.13. Install with: winget install --id EclipseAdoptium.Temurin.21.JDK -e ; then rerun, or pass -JdkDir "C:\path\to\jdk-21".'
 }
 
 function Find-AvdSerial {
@@ -78,6 +120,13 @@ try {
     if (-not (Test-Path (Join-Path $sdk 'platforms\android-36\android.jar'))) {
         throw 'Android SDK Platform 36 is required by the current app. Install it in Android Studio > SDK Manager.'
     }
+    $jdk = Find-CompatibleJdk $JdkDir $flutter
+    $env:JAVA_HOME = $jdk
+    $env:Path = "$(Join-Path $jdk 'bin');$env:Path"
+    Write-Host "Using compatible Java SDK: $jdk" -ForegroundColor Green
+    # Flutter otherwise prefers Android Studio's bundled runtime over JAVA_HOME.
+    # This intentionally persists the JDK choice in this user's Flutter configuration.
+    Invoke-Checked $flutter @('config', "--jdk-dir=$jdk")
     Invoke-Checked $adb @('start-server')
     $avds = @(& $emulator -list-avds)
     if ($LASTEXITCODE -ne 0 -or $avds -notcontains $Avd) {
