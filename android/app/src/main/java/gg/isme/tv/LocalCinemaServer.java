@@ -122,6 +122,9 @@ final class LocalCinemaServer {
         }
         String path = target.split("\\?", 2)[0];
         Map<String, String> query = parseQuery(target);
+        if (path.equals("/stream/video") && (method.equals("GET") || method.equals("HEAD"))) {
+            streamVideo(out, headers.get("range"), method.equals("HEAD"), query.get("session")); return;
+        }
         try {
             if (path.equals("/health")) {
                 sendJson(out, 200, new JSONObject().put("ok", true).put("engine", "android-native")
@@ -162,9 +165,6 @@ final class LocalCinemaServer {
                 out.flush();
                 return;
             }
-            if (path.equals("/stream/video") && (method.equals("GET") || method.equals("HEAD"))) {
-                streamVideo(out, headers.get("range"), method.equals("HEAD")); return;
-            }
             if (!method.equals("GET") && !method.equals("HEAD")) {
                 sendJson(out, 405, new JSONObject().put("error", "Method not allowed")); return;
             }
@@ -187,37 +187,46 @@ final class LocalCinemaServer {
         return values;
     }
 
-    private void streamVideo(OutputStream out, String range, boolean head) throws Exception {
+    private void streamVideo(OutputStream out, String range, boolean head, String requestedSession) throws Exception {
+        final long generation = torrents.generation();
+        if (requestedSession != null && !Long.toString(generation).equals(requestedSession)) {
+            rawHeaders(out, 410, "Gone", "text/plain", 0, ""); return;
+        }
         long size = torrents.movieSize();
         if (size <= 0) {
-            sendJson(out, 409, new JSONObject().put("error", "Movie not ready")); return;
+            rawHeaders(out, 409, "Conflict", "text/plain", 0, ""); return;
         }
         long start = 0, end = size - 1;
         boolean partial = range != null && !range.isEmpty();
         if (partial) {
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile("^bytes=(\\d+)-(\\d*)$")
-                .matcher(range);
-            if (!m.matches()) {
+            try {
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("^bytes=(\\d*)-(\\d*)$").matcher(range);
+                if (!m.matches() || (m.group(1).isEmpty() && m.group(2).isEmpty()))
+                    throw new IllegalArgumentException("Invalid range");
+                if (m.group(1).isEmpty()) {
+                    long suffix = Long.parseLong(m.group(2));
+                    if (suffix <= 0) throw new IllegalArgumentException("Invalid suffix");
+                    start = Math.max(0, size - suffix);
+                } else {
+                    start = Long.parseLong(m.group(1));
+                    if (!m.group(2).isEmpty()) end = Math.min(end, Long.parseLong(m.group(2)));
+                }
+                if (start >= size || end < start) throw new IllegalArgumentException("Unsatisfiable range");
+            } catch (IllegalArgumentException e) {
                 rawHeaders(out, 416, "Range Not Satisfiable", "text/plain", 0,
                     "Content-Range: bytes */" + size + "\r\n"); return;
             }
-            start = Long.parseLong(m.group(1));
-            if (start >= size) {
-                rawHeaders(out, 416, "Range Not Satisfiable", "text/plain", 0,
-                    "Content-Range: bytes */" + size + "\r\n"); return;
-            }
-            end = m.group(2).isEmpty() ? size - 1 : Math.min(size - 1, Long.parseLong(m.group(2)));
-            if (end < start) {
-                rawHeaders(out, 416, "Range Not Satisfiable", "text/plain", 0,
-                    "Content-Range: bytes */" + size + "\r\n"); return;
-            }
-        } else end = size - 1;
-        long contentLength = end - start + 1;
+        }
+        String mime = torrents.mimeType();
+        if (generation != torrents.generation()) {
+            rawHeaders(out, 410, "Gone", "text/plain", 0, ""); return;
+        }
         String extra = "Accept-Ranges: bytes\r\n" + (partial
             ? "Content-Range: bytes " + start + "-" + end + "/" + size + "\r\n" : "");
         rawHeaders(out, partial ? 206 : 200, partial ? "Partial Content" : "OK",
-            torrents.mimeType(), contentLength, extra);
-        if (!head) torrents.writeRange(start, end, out);
+            mime, end - start + 1, extra);
+        // Once headers are sent, close on failure instead of appending JSON to media bytes.
+        if (!head) torrents.writeRange(start, end, generation, out);
     }
 
     private static void sendJson(OutputStream out, int code, JSONObject json) throws IOException {

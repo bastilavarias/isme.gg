@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'design.dart';
+import 'cinema_shelf.dart';
 import 'engine.dart';
 import 'player.dart';
 
@@ -103,14 +104,14 @@ class _CinemaHomeState extends State<CinemaHome> {
   Widget poster(Movie m,bool tv)=>RemoteTile(label:m.title,onPressed:()=>open(m),onFocused:()=>selected.value=m,child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
     Expanded(child:CinemaArt(m.poster)),Padding(padding:const EdgeInsets.all(5),child:Text(m.title,maxLines:1,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?15:12)))
   ]));
-  Widget shelf(String name,List<Movie> movies,bool tv)=>Padding(padding:const EdgeInsets.only(bottom:22),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+  Widget shelf(String name,List<Movie> movies,bool tv)=>tv?CinemaShelf(key:ValueKey(name),title:name,movies:movies,onHighlight:(m)=>selected.value=m,onOpen:open):Padding(padding:const EdgeInsets.only(bottom:22),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     Padding(padding:EdgeInsets.symmetric(horizontal:tv?40:16),child:Text(name,style:TextStyle(fontSize:tv?22:19,fontWeight:FontWeight.w700))),
     const SizedBox(height:10),
     SizedBox(height:tv?204:175,child:ListView.builder(scrollDirection:Axis.horizontal,padding:EdgeInsets.symmetric(horizontal:tv?40:16),itemCount:movies.length,itemBuilder:(_,i)=>Padding(padding:const EdgeInsets.only(right:10),child:SizedBox(width:tv?132:112,child:poster(movies[i],tv)))))
   ]));
   Widget buildHome(bool tv)=>Stack(children:[
     if(tv) Positioned.fill(child:ValueListenableBuilder<Movie?>(valueListenable:selected,builder:(_,m,__)=>m==null?const SizedBox():Stack(fit:StackFit.expand,children:[
-      Align(alignment:Alignment.topRight,child:SizedBox(width:MediaQuery.sizeOf(context).width*.82,height:MediaQuery.sizeOf(context).height*.72,child:CinemaArt(m.art,cacheWidth:1280))),
+      Align(alignment:Alignment.topRight,child:SizedBox(width:MediaQuery.sizeOf(context).width*.82,height:MediaQuery.sizeOf(context).height*.72,child:AnimatedSwitcher(duration:MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:240),layoutBuilder:(current,previous)=>Stack(fit:StackFit.expand,children:[...previous,if(current!=null)current]),child:CinemaArt(m.art,key:ValueKey(m.art),cacheWidth:1280)))),
       const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(colors:[CinemaColors.canvas,Color(0xAA11110F),Colors.transparent],stops:[0,.42,1]))),
       const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Colors.transparent,CinemaColors.canvas],stops:[.20,.76])))
     ]))),
@@ -123,15 +124,20 @@ class _CinemaHomeState extends State<CinemaHome> {
         else if(failures.containsKey(entry.key))SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.all(16),child:TextButton(onPressed:load,child:Text('Retry ${entry.value}'))))
     ])
   ]);
-  Widget hero(Movie m,bool tv)=>SizedBox(height:tv?270:340,child:Stack(fit:StackFit.expand,children:[
-    if(!tv)...[CinemaArt(m.art,cacheWidth:900),const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Colors.transparent,CinemaColors.canvas])))],
-    Padding(padding:EdgeInsets.fromLTRB(tv?40:16,24,16,16),child:Align(alignment:Alignment.bottomLeft,child:ConstrainedBox(constraints:BoxConstraints(maxWidth:tv?440:340),child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
-      Text(m.title,maxLines:2,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?42:32,height:1.05,fontWeight:FontWeight.w800)),
-      if(m.year.isNotEmpty)Padding(padding:const EdgeInsets.only(top:8),child:Text(m.year,style:const TextStyle(color:CinemaColors.muted))),
-      if(tv)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Text(m.description,maxLines:2,overflow:TextOverflow.ellipsis)),
-      const SizedBox(height:14),FilledButton.icon(onPressed:()=>open(m),icon:const Icon(Icons.play_arrow),label:const Text('Watch'))
-    ]))))
-  ]));
+  Widget hero(Movie m,bool tv)=>Stack(children:[
+    if(!tv) Positioned.fill(child:Stack(fit:StackFit.expand,children:[
+      CinemaArt(m.art,cacheWidth:900),
+      const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Colors.transparent,CinemaColors.canvas])))
+    ])),
+    ConstrainedBox(constraints:BoxConstraints(minHeight:tv?270:340),child:SizedBox(width:double.infinity,
+      child:Padding(padding:EdgeInsets.fromLTRB(tv?40:16,24,16,16),child:Align(alignment:Alignment.bottomLeft,heightFactor:1,
+        child:ConstrainedBox(constraints:BoxConstraints(maxWidth:tv?440:340),child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+          Text(m.title,maxLines:2,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?42:32,height:1.05,fontWeight:FontWeight.w800)),
+          if(m.year.isNotEmpty)Padding(padding:const EdgeInsets.only(top:8),child:Text(m.year,style:const TextStyle(color:CinemaColors.muted))),
+          if(tv)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Text(m.description,maxLines:2,overflow:TextOverflow.ellipsis)),
+          const SizedBox(height:14),FilledButton.icon(onPressed:()=>open(m),icon:const Icon(Icons.play_arrow),label:const Text('Watch'))
+        ]))))))
+  ]);
 }
 class Details extends StatelessWidget {
   final Movie movie;final NativeEngine engine;final History history;

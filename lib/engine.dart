@@ -46,6 +46,33 @@ class NativeEngine {
     await json('/api/play',body:{'id':movie.id,'title':movie.title,'magnet':magnet,'sourceIndex':source});
   }
   Future<Map<String,dynamic>> status() => json('/api/status');
+  // Validate bounded byte-range responses before handing the URI to Media3.
+  Future<void> probe(Uri uri) async {
+    if (uri.scheme != 'http' || uri.host != origin.host || uri.port != origin.port) {
+      throw StateError('Invalid playback origin');
+    }
+    final request = http.Request('GET', uri)
+      ..headers.addAll({...headers, 'Range': 'bytes=0-4095'});
+    final response = await _client.send(request).timeout(const Duration(seconds: 40));
+    final range = RegExp(r'^bytes 0-(\d+)/(\d+)$').firstMatch(response.headers['content-range'] ?? '');
+    final end = range == null ? -1 : int.parse(range.group(1)!);
+    final size = range == null ? 0 : int.parse(range.group(2)!);
+    if (response.statusCode != 206 || size <= 0 ||
+        end != (size < 4096 ? size - 1 : 4095) ||
+        response.contentLength != end + 1) {
+      final subscription = response.stream.listen((_) {});
+      await subscription.cancel();
+      throw StateError('Media range response invalid (HTTP ${response.statusCode})');
+    }
+    int received = 0;
+    await for (final chunk in response.stream.timeout(const Duration(seconds: 40))) {
+      received += chunk.length;
+      if (received > end + 1) throw StateError('Media range response too long');
+    }
+    if (received != end + 1) throw StateError('Media range response truncated');
+  }
+  Future<Map<String,dynamic>> audioDiagnostics() async =>
+    await channel.invokeMapMethod<String,dynamic>('audioDiagnostics') ?? {};
   Future<void> stop() async { await json('/api/stop',body:{}); }
   Future<List<Map<String,dynamic>>> subtitles() async {
     final data=await json('/api/subtitles');

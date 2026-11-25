@@ -21,8 +21,8 @@ class CinemaArt extends StatelessWidget {
 }
 class RemoteTile extends StatefulWidget {
   final Widget child; final VoidCallback onPressed; final VoidCallback? onFocused;
-  final bool autofocus; final String? label;
-  const RemoteTile({super.key,required this.child,required this.onPressed,this.onFocused,this.autofocus=false,this.label});
+  final bool autofocus, revealOnFocus; final String? label;
+  const RemoteTile({super.key,required this.child,required this.onPressed,this.onFocused,this.autofocus=false,this.revealOnFocus=true,this.label});
   @override State<RemoteTile> createState()=>_RemoteTileState();
 }
 class _RemoteTileState extends State<RemoteTile> {
@@ -31,7 +31,7 @@ class _RemoteTileState extends State<RemoteTile> {
     autofocus:widget.autofocus,
     shortcuts: const {SingleActivator(LogicalKeyboardKey.select):ActivateIntent(),SingleActivator(LogicalKeyboardKey.enter):ActivateIntent()},
     actions: {ActivateIntent:CallbackAction<ActivateIntent>(onInvoke:(_){widget.onPressed();return null;})},
-    onFocusChange:(value){setState(()=>focused=value);if(value){widget.onFocused?.call();Scrollable.ensureVisible(context,duration:Duration.zero,alignmentPolicy:ScrollPositionAlignmentPolicy.keepVisibleAtEnd);}},
+    onFocusChange:(value){setState(()=>focused=value);if(value){widget.onFocused?.call();if(widget.revealOnFocus)Scrollable.ensureVisible(context,duration:Duration.zero,alignmentPolicy:ScrollPositionAlignmentPolicy.keepVisibleAtEnd);}},
     child:Semantics(button:true,label:widget.label,child:GestureDetector(onTap:widget.onPressed,child:Container(
       decoration:BoxDecoration(borderRadius:BorderRadius.circular(8),border:Border.all(color:focused?CinemaColors.accent:Colors.transparent,width:3)),
       child:ClipRRect(borderRadius:BorderRadius.circular(5),child:widget.child)))));

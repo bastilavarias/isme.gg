@@ -38,6 +38,15 @@ public final class MainActivity extends FlutterActivity {
                         info.put("origin", cinema.url()); info.put("token", cinema.token()); info.put("tv", tv);
                         result.success(info);
                     } catch (Exception e) { result.error("ENGINE", "Could not start local playback engine", null); }
+                } else if ("audioDiagnostics".equals(call.method)) {
+                    android.media.AudioManager audio = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
+                    Map<String,Object> data = new HashMap<>();
+                    if (audio != null) {
+                        data.put("sampleRate", audio.getProperty(android.media.AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE));
+                        data.put("framesPerBuffer", audio.getProperty(android.media.AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER));
+                        data.put("musicVolume", audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC));
+                    }
+                    result.success(data);
                 } else if ("checkUpdates".equals(call.method)) {
                     if (BuildConfig.RELEASE_REPO.isEmpty()) {
                         result.error("NOT_CONFIGURED", "Release repository not configured", null);

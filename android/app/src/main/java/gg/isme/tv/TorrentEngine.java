@@ -43,6 +43,9 @@ final class TorrentEngine {
     private String error = "";
     private int selectedSource = 0;
     private List<MediaCatalog.Source> choices = new ArrayList<>();
+    // One in-memory candidate snapshot; never persisted to disk.
+    private String choiceId = "";
+    private List<MediaCatalog.Source> choiceSnapshot = new ArrayList<>();
     private long sequence = 0L;
     private final Object lock = new Object();
 
@@ -54,7 +57,14 @@ final class TorrentEngine {
 
     void start(String id, String name, int sourceIndex, String directMagnet) {
         final long token;
+        final List<MediaCatalog.Source> prior;
         synchronized (lock) {
+            // Reuse the exact candidate snapshot for retries of the same title.
+            prior = id.equals(choiceId) && (directMagnet == null || directMagnet.isEmpty())
+                ? new ArrayList<>(choiceSnapshot) : new ArrayList<>();
+            if (!id.equals(choiceId) || (directMagnet != null && !directMagnet.isEmpty())) {
+                choiceId = ""; choiceSnapshot.clear();
+            }
             stopLocked();
             token = ++sequence;
             currentId = id;
@@ -67,6 +77,7 @@ final class TorrentEngine {
         new Thread(() -> {
             try {
                 List<MediaCatalog.Source> found;
+                String resolvedImdb = "";
                 if (directMagnet != null && !directMagnet.isEmpty()) {
                     java.util.regex.Matcher match = java.util.regex.Pattern
                         .compile("(?i)^magnet:\\?xt=urn:btih:([a-f0-9]{40})(?:&.*)?$")
@@ -79,15 +90,20 @@ final class TorrentEngine {
                     String imdb = id.startsWith("imdb:") ? id.substring(5) : "";
                     if (!imdb.matches("tt[0-9]{7,10}"))
                         throw new IOException("This title has no IMDb ID");
-                    imdbId = imdb;
-                    found = MediaCatalog.resolve(imdb, name);
+                    resolvedImdb = imdb;
+                    found = prior.isEmpty() ? MediaCatalog.resolve(imdb, name) : prior;
                 }
                 if (found.isEmpty()) throw new IOException("No matching torrent sources found");
-                int selection = Math.min(Math.max(0, sourceIndex), found.size() - 1);
+                if (sourceIndex < 0 || sourceIndex >= found.size()) throw new IOException("Source index unavailable");
+                int selection = sourceIndex;
                 MediaCatalog.Source chosen = found.get(selection);
                 synchronized (lock) {
                     if (token != sequence) return;
                     choices = found;
+                    if (directMagnet == null || directMagnet.isEmpty()) {
+                        choiceId = id; choiceSnapshot = new ArrayList<>(found);
+                    }
+                    imdbId = resolvedImdb;
                     selectedSource = selection;
                     status = "loading";
                     message = "Connecting to torrent peers...";
@@ -116,7 +132,17 @@ final class TorrentEngine {
                 handle = session.find(Sha1Hash.parseHex(source.hash));
                 if (handle != null && handle.isValid()) {
                     TorrentInfo ti = handle.torrentFile();
-                    if (ti != null && ti.isValid()) prepareVideo(ti);
+                    if (ti != null && ti.isValid()) {
+                        try { prepareVideo(ti); }
+                        catch (Exception e) { status = "error"; error = e.getMessage() == null ? "Media validation failed" : e.getMessage(); message = error; }
+                    }
+                }
+            }
+            if ("buffering".equals(status) && handle != null && movieFile != null) {
+                int first = (int)(fileOffset / pieceLength);
+                if (handle.isValid() && handle.havePiece(first) && movieFile.isFile()) {
+                    status = "ready";
+                    message = "Ready to stream from peers";
                 }
             }
             JSONObject data = new JSONObject().put("id", currentId).put("title", title)
@@ -134,7 +160,7 @@ final class TorrentEngine {
                 } catch (Throwable ignored) {}
             }
             if ("ready".equals(status)) {
-                data.put("streamUrl", "/stream/video");
+                data.put("streamUrl", "/stream/video?session=" + sequence);
                 data.put("fileName", movieFile.getName());
                 data.put("bytes", movieLength);
                 if (!imdbId.isEmpty()) data.put("imdbId", imdbId);
@@ -175,19 +201,20 @@ final class TorrentEngine {
         fileOffset = files.fileOffset(picked);
         movieLength = files.fileSize(picked);
         handle.setSequentialRange(Math.toIntExact(fileOffset / pieceLength));
-        status = "ready";
-        message = "Ready to stream from peers";
+        status = "buffering";
+        message = "Waiting for verified initial data";
     }
 
-    /** Called by localhost HTTP handlers. Return number of bytes written. */
-    void writeRange(long start, long end, OutputStream output) throws Exception {
+    long generation() { synchronized (lock) { return sequence; } }
+    /** Called by localhost HTTP handlers; a stale request cannot read the next session. */
+    void writeRange(long start, long end, long expectedGeneration, OutputStream output) throws Exception {
         TorrentHandle torrent;
         File file;
         long offset;
         int length;
         long generation;
         synchronized (lock) {
-            if (!"ready".equals(status) || handle == null || movieFile == null)
+            if (expectedGeneration != sequence || !"ready".equals(status) || handle == null || movieFile == null)
                 throw new IOException("Movie not ready");
             torrent = handle; file = movieFile; offset = fileOffset; length = pieceLength;
             generation = sequence;
@@ -219,13 +246,15 @@ final class TorrentEngine {
     }
 
     private void waitForPiece(TorrentHandle torrent, int piece, long generation) throws Exception {
-        long deadline = System.currentTimeMillis() + 35000;
-        while (!torrent.havePiece(piece)) {
-            if (System.currentTimeMillis() > deadline)
-                throw new IOException("Torrent peers are not delivering the required piece");
+        long deadline = android.os.SystemClock.elapsedRealtime() + 35000;
+        while (true) {
             synchronized (lock) {
-                if (generation != sequence) throw new IOException("Playback stopped");
+                if (generation != sequence || torrent != handle || !torrent.isValid())
+                    throw new IOException("Playback stopped");
+                if (torrent.havePiece(piece)) return;
             }
+            if (android.os.SystemClock.elapsedRealtime() > deadline)
+                throw new IOException("Media data deadline exceeded");
             Thread.sleep(125);
         }
     }

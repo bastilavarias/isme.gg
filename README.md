@@ -2,8 +2,11 @@
 Independent source project at /home/sebastech/projects/ismegg. Original React/WebView project is unchanged.
 This is an implementation draft, not a verified build. Flutter, Dart, JDK and Gradle are not available on the server PATH. No APK was compiled or installed there. Android compilation, physical TV navigation, subtitles and native playback still need verification on Windows.
 
+## Windows one-click development launcher
+Double-click `setupwindows.bat` in the repository root (or run `.\setupwindows.bat` in PowerShell). On a clean main branch it fast-forward pulls the latest GitHub code, starts or reuses `ismegg_TV_API_36`, waits for Android boot, prepares the Gradle wrapper and dependencies, then builds, installs and launches the debug app with `flutter run`. Keep the terminal open for hot reload (`r`, `R`, `q`). Use `-SkipPull` to test uncommitted local changes, or `-Avd NAME` for another existing Android virtual device. Tracked local changes stop the automatic pull rather than being overwritten. The launcher needs an already configured Flutter/Android SDK and does not install them. It does not modify AVD ABI or emulator input settings. If the emulator requires local adaptations for native library compatibility, preserve those separately. Windows execution has not been verified on the server.
+
 ## Windows setup
-1. Install Flutter stable (Dart >=3.6), Android Studio, SDK 35, compatible JDK 17+ and platform tools. Run flutter doctor -v and flutter doctor --android-licenses.
+1. Install Flutter stable (Flutter >=3.38, Dart >=3.10), Android Studio, SDK 36, compatible JDK 17+ and platform tools. Run flutter doctor -v and flutter doctor --android-licenses.
 2. From PowerShell copy the source (same LAN, SSH access required):
    `scp -r sebastech@192.168.1.109:/home/sebastech/projects/ismegg .`
 3. `cd ismegg`, `flutter pub get`, `flutter analyze`, `flutter test`.
@@ -17,7 +20,7 @@ This is an implementation draft, not a verified build. Flutter, Dart, JDK and Gr
 - HTTP requests use a random per-process X-Isme-Token; range requests allow normal open-ended Media3 reads. Media pieces temporarily reside in app-private cache. External metadata/source/subtitle providers remain dependencies. Play only content you are authorized to access and test with legally shared media.
 - Player switches subtitle caption files on the same controller (no planned seek/reinitialize), supports play/pause, seek, source selection, resume and cancellation. Existing provider availability/codec issues are not solved by migration.
 - Original UI reference and orange/dark theme, independent Flutter widgets; no third-party clone source or assets imported because exact file licensing/dependencies were not audited.
-- Dependencies are provisional version constraints; lockfile and exact Android Gradle compatibility must be resolved on Windows. Riverpod deferred in favor of simple local state for first pass. Native updater code retained but intentionally disabled until repository and signing are configured. No automatic update or release signing yet. Audio track selection and subtitle timing adjustment remain follow-ups.
+- Dependencies are provisional version constraints; lockfile and exact Android Gradle compatibility must be resolved on Windows. Riverpod deferred in favor of simple local state for first pass. Native updater code retained but intentionally disabled until repository and signing are configured. No automatic update or release signing yet. Audio track selection is implemented in source; subtitle timing adjustment remains a follow-up. See PLAYER_TESTING.md for unverified player regression checks.
 - Native method channel is used for connection and update action; on-device HTTP polling for existing engine state (not a full typed event-channel migration).
 ## Validation checklist
 Run flutter analyze/test and compile on Windows. Verify TV launcher and D-pad navigation, focus after back, phone rotation and landscape controls, catalog and search, authorized test video startup/seek/subtitles, no position reset on caption switch, stop and cache cleanup, crash recovery, and memory/frame times over repeated playback. Check ARM64 and ARMv7 devices. Profile on the physical TV before claiming performance gains. No release cutover until these pass.
