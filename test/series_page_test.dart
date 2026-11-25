@@ -21,6 +21,17 @@ void main(){
     expect(anime.episodic,isTrue);
     expect(Movie.fromJson(anime.toJson()).type,'Anime');
   });
+  test('episode identity is distinct from parent show and other episodes',(){
+    const show=Movie(id:'imdb:tt1234567',title:'Example',type:'Series');
+    const first=Movie(id:'imdb:tt1234567:s1:e1',title:'Example · S1 E1',type:'Series');
+    const second=Movie(id:'imdb:tt1234567:s1:e2',title:'Example · S1 E2',type:'Series');
+    const anime=Movie(id:'tmdb:tv:123:s0:e1',title:'Special',type:'Anime');
+    expect(show.isEpisode,isFalse);
+    expect(first.isEpisode,isTrue);
+    expect(anime.isEpisode,isTrue);
+    expect(first.id,isNot(second.id));
+    expect(Movie.fromJson(first.toJson()).isEpisode,isTrue);
+  });
   testWidgets('season tabs load the corresponding episodes',(tester)async{
     SharedPreferences.setMockInitialValues({});
     final history=History(await SharedPreferences.getInstance());

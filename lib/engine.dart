@@ -10,6 +10,7 @@ class Movie {
   final int tmdbId;
   final String type;
   bool get episodic=>type=='Series'||type=='Anime';
+  bool get isEpisode=>episodic&&RegExp(r'^(imdb:tt[0-9]{7,10}|tmdb:tv:[1-9][0-9]{0,8}):s[0-9]{1,5}:e[0-9]{1,5}$').hasMatch(id);
   const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = '', this.genre = '', this.runtime = '', this.rating = '', this.tmdbId = 0, this.type='Movie'});
   static String _field(dynamic value) => value == null ? '' : value.toString().trim();
   static String _genre(dynamic value) => value is List ? value.take(2).map(_field).where((s)=>s.isNotEmpty).join(', ') : _field(value);
@@ -136,7 +137,7 @@ class NativeEngine {
   Future<List<Movie>> catalog(String collection, {String query = ''}) async =>
     (await catalogSnapshot(collection,query:query)).movies;
   Future<void> start(Movie movie, {String magnet = '', int source = 0}) async {
-    await json('/api/play',body:{'id':movie.id,'title':movie.title,'magnet':magnet,'sourceIndex':source});
+    await json('/api/play',body:{'id':movie.id,'title':movie.title,'magnet':magnet,'sourceIndex':source,if(movie.isEpisode&&movie.id.startsWith('tmdb:tv:'))'tmdbToken':_providerToken});
   }
   Future<Map<String,dynamic>> status() => json('/api/status');
   // Validate bounded byte-range responses before handing the URI to Media3.

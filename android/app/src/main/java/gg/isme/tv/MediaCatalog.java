@@ -117,11 +117,15 @@ final class MediaCatalog {
 
     static final class Source {
         final String name, magnet, hash, quality;
-        final int seeders, index;
+        final int seeders, index, fileIndex;
         final long bytes;
         Source(String name, String magnet, String hash, String quality, int seeders, long bytes, int index) {
+            this(name,magnet,hash,quality,seeders,bytes,index,-1);
+        }
+        Source(String name, String magnet, String hash, String quality, int seeders, long bytes, int index,int fileIndex) {
             this.name = name; this.magnet = magnet; this.hash = hash;
             this.quality = quality; this.seeders = seeders; this.bytes = bytes; this.index = index;
+            this.fileIndex=fileIndex;
         }
         JSONObject publicJson() throws Exception {
             return new JSONObject().put("name", name).put("index", index)
@@ -131,8 +135,9 @@ final class MediaCatalog {
     }
 
     static List<Source> resolve(String imdbId, String title) throws Exception {
-        if (!imdbId.matches("tt[0-9]{7,10}")) throw new IOException("Invalid IMDb ID");
-        JSONObject result = getJson(TORRENTIO + "/stream/movie/" + imdbId + ".json", 2 * 1024 * 1024);
+        boolean episodic=imdbId.matches("tt[0-9]{7,10}:[0-9]{1,5}:[0-9]{1,5}");
+        if (!episodic&&!imdbId.matches("tt[0-9]{7,10}")) throw new IOException("Invalid media ID");
+        JSONObject result = getJson(TORRENTIO + "/stream/"+(episodic?"series":"movie")+"/" + imdbId + ".json", 2 * 1024 * 1024);
         JSONArray streams = result.optJSONArray("streams");
         List<Source> found = new ArrayList<>();
         if (streams == null) return found;
@@ -143,9 +148,15 @@ final class MediaCatalog {
             if (!hash.matches("[a-f0-9]{40}")) continue;
             String release = stream.optString("title", stream.optString("name", ""));
             String shortName = release.split("\\n")[0];
-            if (!containsTitle(shortName, title)) continue;
+            // For episodic content the resolver key includes exact season and
+            // episode; translated and alternate titles need not match the display title.
+            if (!episodic&&!containsTitle(shortName, title)) continue;
+            int fileIndex=episodic?stream.optInt("fileIdx",-1):-1;
+            if(fileIndex < -1)continue;
             long bytes = parseSize(release);
-            if (bytes > MAX_BYTES) continue;
+            // A pack can report aggregate size. The engine separately checks the
+            // selected video's size and refuses ambiguous multi-file episodes.
+            if (bytes > MAX_BYTES&&(!episodic||fileIndex<0)) continue;
             String quality = release.contains("720p") ? "720p"
                 : release.contains("1080p") ? "1080p" : release.contains("480p") ? "480p" : "Unknown";
             if (release.toLowerCase(Locale.ROOT).matches(".*(?:\\bcam\\b|telesync|hdcam).*")) continue;
@@ -163,16 +174,16 @@ final class MediaCatalog {
                 }
             }
             if (magnet.indexOf("&tr=") < 0) magnet += "&tr=" + encode("udp://tracker.opentrackr.org:1337/announce");
-            found.add(new Source(shortName, magnet, hash, quality, seeders, bytes, 0));
+            found.add(new Source(shortName, magnet, hash, quality, seeders, bytes, 0,fileIndex));
         }
         found.sort(Comparator.comparingInt(MediaCatalog::score).reversed());
         List<Source> resultList = new ArrayList<>();
         java.util.HashSet<String> seen = new java.util.HashSet<>();
         for (Source entry : found) {
-            if (!seen.add(entry.hash)) continue;
+            if (!seen.add(entry.hash+":"+entry.fileIndex)) continue;
             int idx = resultList.size();
             resultList.add(new Source(entry.name, entry.magnet, entry.hash, entry.quality,
-                entry.seeders, entry.bytes, idx));
+                entry.seeders, entry.bytes, idx,entry.fileIndex));
             if (resultList.size() == 16) break;
         }
         return resultList;

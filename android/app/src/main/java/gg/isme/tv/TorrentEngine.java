@@ -55,7 +55,7 @@ final class TorrentEngine {
         removeRecursively(root);
     }
 
-    void start(String id, String name, int sourceIndex, String directMagnet) {
+    void start(String id, String name, int sourceIndex, String directMagnet, String episodeKey) {
         final long token;
         final List<MediaCatalog.Source> prior;
         synchronized (lock) {
@@ -87,9 +87,9 @@ final class TorrentEngine {
                     found.add(new MediaCatalog.Source(name, directMagnet, match.group(1),
                         "Unknown", 0, -1, 0));
                 } else {
-                    String imdb = id.startsWith("imdb:") ? id.substring(5) : "";
-                    if (!imdb.matches("tt[0-9]{7,10}"))
-                        throw new IOException("This title has no IMDb ID");
+                    String imdb = episodeKey.isEmpty()?(id.startsWith("imdb:") ? id.substring(5) : ""):episodeKey;
+                    if (!imdb.matches("tt[0-9]{7,10}(?::[0-9]{1,5}:[0-9]{1,5})?"))
+                        throw new IOException("This title has no supported media ID");
                     resolvedImdb = imdb;
                     found = prior.isEmpty() ? MediaCatalog.resolve(imdb, name) : prior;
                 }
@@ -175,14 +175,22 @@ final class TorrentEngine {
         if (files == null || files.numFiles() == 0) return;
         long longest = 0L;
         int picked = -1;
+        int playable=0;
+        boolean episodic=imdbId.contains(":");
+        int exactIndex=episodic?choices.get(selectedSource).fileIndex:-1;
+        if(exactIndex>=files.numFiles())throw new IOException("Episode file index unavailable");
         for (int i = 0; i < files.numFiles(); i++) {
             String filename = files.fileName(i).toLowerCase(Locale.ROOT);
             if (!filename.matches(".*\\.(mp4|m4v|webm|mkv|mov)$")) continue;
+            playable++;
+            if(exactIndex>=0&&i!=exactIndex)continue;
             if (files.fileSize(i) > longest) {
                 longest = files.fileSize(i);
                 picked = i;
             }
         }
+        if(episodic&&exactIndex<0&&playable!=1)
+            throw new IOException("Episode file could not be identified unambiguously");
         if (picked < 0) throw new IOException("No playable video file found");
         if (longest > MediaCatalog.MAX_BYTES || longest <= 0)
             throw new IOException("Video exceeds 3 GiB device cache limit");

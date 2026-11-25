@@ -114,6 +114,20 @@ final class SeriesCatalog {
         JSONObject row=rows==null?null:rows.optJSONObject(0);
         return row==null?0:row.optInt("id",0);
     }
+    // Resolve the parent series identity through metadata, not a guessed episode number.
+    String imdbId(String id,String token)throws Exception{
+        if(!validId(id))throw new IllegalArgumentException("Invalid series ID");
+        if(id.startsWith("imdb:"))return id.substring(5);
+        CatalogCache.Entry saved=cache.read("episodes",id+":external");
+        String imdb=saved==null?"":saved.data.optString("imdb","");
+        if(imdb.matches("tt[0-9]{7,10}"))return imdb;
+        if(token.isEmpty())throw new IOException("TMDB connection required to identify this series");
+        JSONObject ids=WatchProviders.get("/tv/"+tmdbId(id,token)+"/external_ids",token);
+        imdb=ids.optString("imdb_id","");
+        if(!imdb.matches("tt[0-9]{7,10}"))throw new IOException("No IMDb mapping for this series");
+        cache.write("episodes",id+":external",new JSONObject().put("imdb",imdb));
+        return imdb;
+    }
     JSONObject seasons(String id,String token)throws Exception{
         if(!validId(id))throw new IllegalArgumentException("Invalid series ID");
         CatalogCache.Entry entry=cache.read("episodes",id+":seasons");

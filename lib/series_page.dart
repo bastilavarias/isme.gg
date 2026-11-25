@@ -21,7 +21,7 @@ class _SeriesPageState extends State<SeriesPage> {
   List<Episode> _episodes=[];
   int? _season;
   Episode? _highlight;
-  bool _loading=true;
+  bool _loading=true, _openingEpisode=false;
   String? _error;
   int _generation=0;
   Duration get _motion=>MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:260);
@@ -69,26 +69,15 @@ class _SeriesPageState extends State<SeriesPage> {
   Future<void> _openEpisode(Episode ep) async {
     final season=_season;
     if(season==null)return;
-    final controller=TextEditingController();
-    final source=await showDialog<String>(context:context,builder:(ctx)=>AlertDialog(
-      title:Text('S$season E${ep.number} · ${ep.title}'),
-      content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
-        if(ep.description.isNotEmpty)Text(ep.description),
-        const SizedBox(height:12),
-        const Text('Episode metadata does not include a video. Open a media source you are authorized to use.'),
-        const SizedBox(height:12),
-        TextField(controller:controller,decoration:const InputDecoration(labelText:'Permitted magnet URI')),
-      ])),
-      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Close')),
-        FilledButton(onPressed:()=>Navigator.pop(ctx,controller.text.trim()),child:const Text('Open source'))]));
-    controller.dispose();
-    if(!mounted||source==null||source.isEmpty)return;
-    if(!RegExp(r'^magnet:\?xt=urn:btih:[a-fA-F0-9]{40}(?:&.*)?$').hasMatch(source)){
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Enter a valid hexadecimal BTIH magnet.')));return;
-    }
+    if(_openingEpisode)return;
+    _openingEpisode=true;
     final media=Movie(id:'${widget.show.id}:s$season:e${ep.number}',title:'${widget.show.title} · S$season E${ep.number}',
       type:widget.show.type,poster:widget.show.poster,backdrop:ep.thumbnail,description:ep.description);
-    await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:media,engine:widget.engine,history:widget.history,magnet:source)));
+    try{
+      await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:media,engine:widget.engine,history:widget.history)));
+    }finally{
+      if(mounted)setState(()=>_openingEpisode=false);
+    }
   }
   @override void dispose(){_generation++;_seasonScroll.dispose();_episodeScroll.dispose();_back.dispose();_seasonScope.dispose();_episodeScope.dispose();super.dispose();}
   Widget _tabs()=>Focus(canRequestFocus:false,onKeyEvent:_seasonKeys,

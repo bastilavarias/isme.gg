@@ -164,11 +164,15 @@ final class LocalCinemaServer {
                 JSONObject body = new JSONObject(new String(data, StandardCharsets.UTF_8));
                 String id = body.optString("id", "");
                 String magnet = body.optString("magnet", "");
-                if (!id.matches("imdb:tt[0-9]{7,10}") && magnet.isEmpty()) {
-                    sendJson(out, 422, new JSONObject().put("error", "Unsupported movie ID")); return;
+                java.util.regex.Matcher episode=java.util.regex.Pattern.compile("^(imdb:tt[0-9]{7,10}|tmdb:tv:[1-9][0-9]{0,8}):s([0-9]{1,5}):e([0-9]{1,5})$").matcher(id);
+                String episodeKey="";
+                if(magnet.isEmpty()&&episode.matches()){
+                    episodeKey=series.imdbId(episode.group(1),body.optString("tmdbToken",""))+":"+episode.group(2)+":"+episode.group(3);
+                }else if (!id.matches("imdb:tt[0-9]{7,10}") && magnet.isEmpty()) {
+                    sendJson(out, 422, new JSONObject().put("error", "Unsupported media ID")); return;
                 }
                 subtitles.reset();
-                torrents.start(id, body.optString("title", id), body.optInt("sourceIndex", 0), magnet);
+                torrents.start(id, body.optString("title", id), body.optInt("sourceIndex", 0), magnet,episodeKey);
                 sendJson(out, 202, new JSONObject().put("status", "loading")); return;
             }
             if (path.equals("/api/stop") && method.equals("POST")) {

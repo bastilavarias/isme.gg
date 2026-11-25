@@ -198,7 +198,7 @@ class _CinemaHomeState extends State<CinemaHome> {
     });
   }
   Future<void> open(Movie m) async {
-    await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>m.episodic?SeriesPage(show:m,engine:engine,history:widget.history):Details(movie:m,engine:engine,history:widget.history)));
+    await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>m.isEpisode?CinemaPlayer(movie:m,engine:engine,history:widget.history):m.episodic?SeriesPage(show:m,engine:engine,history:widget.history):Details(movie:m,engine:engine,history:widget.history)));
     if(mounted)setState((){});
   }
   Future<void> manual() async {
@@ -348,7 +348,7 @@ class _CinemaHomeState extends State<CinemaHome> {
           Text(m.title,maxLines:2,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?42:32,height:1.05,fontWeight:FontWeight.w800)),
           if(m.year.isNotEmpty)Padding(padding:const EdgeInsets.only(top:8),child:Text(m.year,style:const TextStyle(color:CinemaColors.muted))),
           if(tv)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Text(m.description,maxLines:2,overflow:TextOverflow.ellipsis)),
-          const SizedBox(height:14),Focus(canRequestFocus:false,onKeyEvent:heroKeys,child:FilledButton.icon(focusNode:heroFocus,onFocusChange:(focused){if(focused&&tv)scrollTop();},onPressed:()=>open(m),icon:const Icon(Icons.play_arrow),label:Text(m.episodic?'Episodes':'Watch')))
+          const SizedBox(height:14),Focus(canRequestFocus:false,onKeyEvent:heroKeys,child:FilledButton.icon(focusNode:heroFocus,onFocusChange:(focused){if(focused&&tv)scrollTop();},onPressed:()=>open(m),icon:const Icon(Icons.play_arrow),label:Text(m.isEpisode?'Resume':m.episodic?'Episodes':'Watch')))
         ]))))))
   ]);
 }

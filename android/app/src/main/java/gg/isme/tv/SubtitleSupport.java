@@ -19,10 +19,10 @@ final class SubtitleSupport {
     private JSONArray rows = new JSONArray();
 
     synchronized JSONObject tracks(String imdb) throws Exception {
-        if (!imdb.matches("tt[0-9]{7,10}")) return new JSONObject().put("tracks", new JSONArray());
+        if (!imdb.matches("tt[0-9]{7,10}(?::[0-9]{1,5}:[0-9]{1,5})?")) return new JSONObject().put("tracks", new JSONArray());
         if (!imdb.equals(lastImdb)) {
             JSONObject data = MediaCatalog.getJson(
-                "https://opensubtitles-v3.strem.io/subtitles/movie/" + imdb + ".json", 2 * 1024 * 1024);
+                "https://opensubtitles-v3.strem.io/subtitles/"+(imdb.contains(":")?"series":"movie")+"/" + imdb + ".json", 2 * 1024 * 1024);
             JSONArray incoming = data.optJSONArray("subtitles");
             JSONArray valid = new JSONArray();
             if (incoming != null) for (int i = 0; i < incoming.length() && valid.length() < 150; i++) {

@@ -57,10 +57,10 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(phase=='Initializing player')return 'Starting playback…';
     if(phase=='Stopping')return 'Closing playback…';
     switch(nativeState['status']){
-      case 'resolving':return 'Finding your movie…';
+      case 'resolving':return widget.movie.isEpisode?'Finding your episode…':'Finding your movie…';
       case 'loading':return 'Establishing a connection…';
-      case 'buffering':return 'Getting your movie ready…';
-      default:return recovery.total>1?'Retrying playback…':'Finding your movie…';
+      case 'buffering':return widget.movie.isEpisode?'Getting your episode ready…':'Getting your movie ready…';
+      default:return recovery.total>1?'Retrying playback…':widget.movie.isEpisode?'Finding your episode…':'Finding your movie…';
     }
   }
   void focusControl(FocusNode node){
