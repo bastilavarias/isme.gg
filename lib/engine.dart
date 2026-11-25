@@ -8,18 +8,18 @@ class Movie {
   final String id, title, description, poster, backdrop;
   final String year, genre, runtime, rating;
   final int tmdbId;
-  final String type;
+  final String type, episodeTitle;
   bool get episodic=>type=='Series'||type=='Anime';
   bool get isEpisode=>episodic&&RegExp(r'^(imdb:tt[0-9]{7,10}|tmdb:tv:[1-9][0-9]{0,8}):s[0-9]{1,5}:e[0-9]{1,5}$').hasMatch(id);
-  const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = '', this.genre = '', this.runtime = '', this.rating = '', this.tmdbId = 0, this.type='Movie'});
+  const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = '', this.genre = '', this.runtime = '', this.rating = '', this.tmdbId = 0, this.type='Movie', this.episodeTitle=''});
   static String _field(dynamic value) => value == null ? '' : value.toString().trim();
   static String _genre(dynamic value) => value is List ? value.take(2).map(_field).where((s)=>s.isNotEmpty).join(', ') : _field(value);
   String get metadata => [type,genre,year,runtime,rating].where((s)=>s.isNotEmpty).join(' · ');
   factory Movie.fromJson(Map<String, dynamic> j) => Movie(
     id: j['id']?.toString() ?? '', title: j['title']?.toString() ?? '',
     description: j['description']?.toString() ?? '', poster: j['poster']?.toString() ?? '',
-    backdrop: _field(j['backdrop']), year: _field(j['year']), genre: _genre(j['genres']??j['genre']), runtime: _field(j['runtime']), rating: _field(j['ratingLabel']), tmdbId: int.tryParse(_field(j['tmdbId']))??0, type: const ['Series','Anime'].contains(j['type'])?j['type'] as String:'Movie');
-  Map<String, dynamic> toJson() => {'id':id,'title':title,'description':description,'poster':poster,'backdrop':backdrop,'year':year,'genre':genre,'runtime':runtime,'ratingLabel':rating,'tmdbId':tmdbId,'type':type};
+    backdrop: _field(j['backdrop']), year: _field(j['year']), genre: _genre(j['genres']??j['genre']), runtime: _field(j['runtime']), rating: _field(j['ratingLabel']), tmdbId: int.tryParse(_field(j['tmdbId']))??0, type: const ['Series','Anime'].contains(j['type'])?j['type'] as String:'Movie', episodeTitle:_field(j['episodeTitle']));
+  Map<String, dynamic> toJson() => {'id':id,'title':title,'description':description,'poster':poster,'backdrop':backdrop,'year':year,'genre':genre,'runtime':runtime,'ratingLabel':rating,'tmdbId':tmdbId,'type':type,'episodeTitle':episodeTitle};
   String get art => backdrop.isNotEmpty ? backdrop : poster;
 }
 class Season {
@@ -138,6 +138,14 @@ class NativeEngine {
     (await catalogSnapshot(collection,query:query)).movies;
   Future<void> start(Movie movie, {String magnet = '', int source = 0}) async {
     await json('/api/play',body:{'id':movie.id,'title':movie.title,'magnet':magnet,'sourceIndex':source,if(movie.isEpisode&&movie.id.startsWith('tmdb:tv:'))'tmdbToken':_providerToken});
+  }
+  Future<void> prepareNext(Movie current,Movie next) async {
+    if(!current.isEpisode||!next.isEpisode)return;
+    await json('/api/next/prepare',body:{'currentId':current.id,'id':next.id,'title':next.title,
+      if(next.id.startsWith('tmdb:tv:'))'tmdbToken':_providerToken});
+  }
+  Future<void> cancelNext(Movie current) async {
+    if(current.isEpisode)await json('/api/next/cancel',body:{'currentId':current.id});
   }
   Future<Map<String,dynamic>> status() => json('/api/status');
   // Validate bounded byte-range responses before handing the URI to Media3.

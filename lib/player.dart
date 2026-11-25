@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'playback_recovery.dart';
 import 'player_preferences.dart';
+import 'next_episode.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -18,6 +19,136 @@ class CinemaPlayer extends StatefulWidget {
 }
 class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver {
   VideoPlayerController? player;
+  late Movie _movie;
+  final _nextGate=NextEpisodeGate();
+  final _watchClock=Stopwatch()..start();
+  final _nextFocus=FocusNode(debugLabel:'Play next episode'),_creditsFocus=FocusNode(debugLabel:'Watch credits');
+  Movie? _next;
+  Timer? _countdownTimer;
+  int? _countdown;
+  bool _nextKnown=false,_nextChecking=false,_nextDismissed=false,_nearEnd=false,
+    _prepareRequested=false,_transitioning=false,_foreground=true;
+  int _nextFailures=0;
+  DateTime? _lastNextFailure;
+  Future<void> _prepOps=Future.value();
+  bool get _episodic=>_movie.isEpisode&&widget.magnet.isEmpty;
+  bool get _autoplay=>widget.history.prefs.getBool('isme-autoplay-next')??true;
+  bool get _showNext=>_next!=null&&_nearEnd&&!_nextDismissed&&!_transitioning&&!busy&&!leaving;
+  void _queuePreparation(Movie current,Movie next,int n){
+    if(_prepareRequested)return;
+    _prepareRequested=true;
+    _prepOps=_prepOps.then((_)async{
+      if(!active(n)||!_prepareRequested||_movie.id!=current.id)return;
+      try{await widget.engine.prepareNext(current,next);}catch(_){}
+    });
+  }
+  void _cancelPreparation(){
+    if(!_prepareRequested)return;
+    _prepareRequested=false;
+    final current=_movie;
+    _prepOps=_prepOps.then((_)async{try{await widget.engine.cancelNext(current);}catch(_){}});
+  }
+  void _stopCountdown(){
+    _countdownTimer?.cancel();_countdownTimer=null;_countdown=null;
+  }
+  void _resetNext(){
+    _stopCountdown();_nextGate.reset();
+    _next=null;_nextKnown=false;_nextChecking=false;_nextDismissed=false;_nearEnd=false;
+    _prepareRequested=false;_nextFailures=0;_lastNextFailure=null;
+  }
+  Future<void> _lookupNext(int n) async{
+    if(_nextKnown||_nextChecking||_nextFailures>=2)return;
+    if(_lastNextFailure!=null&&DateTime.now().difference(_lastNextFailure!)<const Duration(seconds:5))return;
+    _nextChecking=true;
+    final current=_movie;
+    try{
+      final result=await findNextEpisode(widget.engine,current);
+      if(!active(n)||_movie.id!=current.id)return;
+      setState((){_next=result;_nextKnown=true;});
+      final c=player;
+      if(c!=null&&c.value.isCompleted)_maybeCountdown();
+    }catch(_){
+      if(active(n)){_nextFailures++;_lastNextFailure=DateTime.now();}
+    }finally{if(active(n))_nextChecking=false;}
+  }
+  void _sampleNext(VideoPlayerController c,int n){
+    if(!_episodic||!_foreground||_transitioning)return;
+    final v=c.value;
+    final stable=_nextGate.sample(position:v.position,duration:v.duration,now:_watchClock.elapsed,
+      playing:v.isPlaying,buffering:v.isBuffering);
+    final near=v.isCompleted||NextEpisodeGate.preview(v.position,v.duration);
+    if(near!=_nearEnd){
+      if(!near)_stopCountdown();
+      setState(()=>_nearEnd=near);
+    }
+    if(v.isCompleted){
+      if(!_nextDismissed&&!_nextKnown)unawaited(_lookupNext(n));
+      _maybeCountdown();return;
+    }
+    if(v.isBuffering||!v.isPlaying||v.duration<=Duration.zero||
+        v.position.inMilliseconds/v.duration.inMilliseconds<.60){
+      _cancelPreparation();
+    }
+    if(v.duration>Duration.zero&&v.position.inMilliseconds/v.duration.inMilliseconds<.60&&_nextDismissed){
+      setState(()=>_nextDismissed=false);
+    }
+    if(_nextDismissed)return;
+    if((stable&&_autoplay)||near){
+      if(!_nextKnown)unawaited(_lookupNext(n));
+      if(stable&&_autoplay&&_next!=null&&!v.isBuffering)_queuePreparation(_movie,_next!,n);
+    }
+  }
+  void _maybeCountdown(){
+    if(!_showNext||!_autoplay||_countdownTimer!=null||!_foreground||
+        !currentRoute||settingsOpen||player?.value.isCompleted!=true)return;
+    hide?.cancel();
+    setState((){_countdown=5;controls=true;});
+    if(widget.engine.tv)WidgetsBinding.instance.addPostFrameCallback((_){
+      if(mounted&&_showNext&&_countdown!=null)focusControl(_nextFocus);
+    });
+    _countdownTimer=Timer.periodic(const Duration(seconds:1),(_){
+      if(!mounted||closed||!_foreground||!currentRoute||settingsOpen||
+          !_showNext||player?.value.isCompleted!=true){
+        _stopCountdown();if(mounted&&!closed)setState((){});return;
+      }
+      if((_countdown??0)<=1){_stopCountdown();unawaited(_playNext());}
+      else{setState(()=>_countdown=_countdown!-1);}
+    });
+  }
+  void _watchCredits(){
+    _stopCountdown();_cancelPreparation();
+    setState(()=>_nextDismissed=true);
+    if(widget.engine.tv){showControls(focus:true);focusControl(playFocus);}
+  }
+  void _markSeek(Duration target,Duration duration){
+    _nextGate.reset();_stopCountdown();
+    if(duration>Duration.zero&&target.inMilliseconds/duration.inMilliseconds<.60){
+      _nextDismissed=false;_cancelPreparation();
+    }
+    _nearEnd=NextEpisodeGate.preview(target,duration);
+  }
+  Future<void> _playNext() async{
+    final next=_next;
+    if(next==null||_transitioning||closed||leaving||!currentRoute||!_foreground)return;
+    _transitioning=true;_stopCountdown();
+    final c=player;
+    final n=++generation;
+    cancelAttempt();watchdog?.cancel();saveTimer?.cancel();hide?.cancel();
+    setState((){player=null;busy=true;phase='Opening next episode';controls=true;progress=0;});
+    if(c!=null){
+      await save(c);
+      try{await c.dispose();}catch(_){}
+    }
+    if(!active(n)||leaving)return;
+    // Same player route and engine: dispose the old decoder before starting
+    // the next episode. Native preparation is consumed by its exact ID.
+    setState((){
+      _movie=next;resume=widget.history.position(next);lastPosition=resume;
+      lastAdvance=DateTime.now();sources=[];captionId=null;lastControl=null;lastBottom=null;
+      _resetNext();_transitioning=false;wantsPlayback=true;
+    });
+    await start();
+  }
   bool closed=false, busy=true, controls=true, leaving=false, wantsPlayback=true;
   int generation=0, progress=0, source=0;
   String? error;
@@ -44,7 +175,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     forwardFocus=FocusNode(debugLabel:'Forward'), ccFocus=FocusNode(debugLabel:'Subtitles'),
     audioFocus=FocusNode(debugLabel:'Audio'), sourceFocus=FocusNode(debugLabel:'Source');
   FocusNode? lastControl, lastBottom;
-  List<FocusNode> get bottomNodes=>[rewindFocus,playFocus,forwardFocus,ccFocus,audioFocus,if(sources.length>1)sourceFocus];
+  List<FocusNode> get bottomNodes=>[rewindFocus,playFocus,forwardFocus,ccFocus,audioFocus,if(sources.length>1)sourceFocus,if(_showNext)...[_nextFocus,_creditsFocus]];
   List<FocusNode> get topNodes=>[backFocus,if(kDebugMode)debugFocus];
   int get subtitleSize=>(widget.history.prefs.getInt('isme-subtitle-size')??1).clamp(0,3).toInt();
   static const subtitleSizes=['Small','Medium','Large','Extra large'];
@@ -57,10 +188,10 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(phase=='Initializing player')return 'Starting playback…';
     if(phase=='Stopping')return 'Closing playback…';
     switch(nativeState['status']){
-      case 'resolving':return widget.movie.isEpisode?'Finding your episode…':'Finding your movie…';
+      case 'resolving':return _movie.isEpisode?'Finding your episode…':'Finding your movie…';
       case 'loading':return 'Establishing a connection…';
-      case 'buffering':return widget.movie.isEpisode?'Getting your episode ready…':'Getting your movie ready…';
-      default:return recovery.total>1?'Retrying playback…':widget.movie.isEpisode?'Finding your episode…':'Finding your movie…';
+      case 'buffering':return _movie.isEpisode?'Getting your episode ready…':'Getting your movie ready…';
+      default:return recovery.total>1?'Retrying playback…':_movie.isEpisode?'Finding your episode…':'Finding your movie…';
     }
   }
   void focusControl(FocusNode node){
@@ -72,9 +203,13 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(!left&&!right&&!up&&!down)return false;
     final top=topNodes,bottom=bottomNodes;
     final t=top.indexWhere((n)=>n.hasFocus),b=bottom.indexWhere((n)=>n.hasFocus);
-    if(seekFocus.hasFocus){
+    if(_showNext&&(_nextFocus.hasFocus||_creditsFocus.hasFocus)){
+      if(left||right)focusControl(right?_creditsFocus:_nextFocus);
+      else if(up)focusControl(backFocus);
+      else if(down)focusControl(playFocus);
+    }else if(seekFocus.hasFocus){
       if(left||right){unawaited(seek(right?10:-10));}
-      else if(up){focusControl(backFocus);}
+      else if(up){focusControl(_showNext?_nextFocus:backFocus);}
       else{focusControl(bottom.contains(lastBottom)?lastBottom!:playFocus);}
     }else if(t>=0){
       if(left||right){focusControl(top[(t+(right?1:-1)).clamp(0,top.length-1).toInt()]);}
@@ -91,7 +226,8 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   String get subtitleLanguage=>widget.history.prefs.getString('isme-subtitle-language')??'eng';
   @override void initState(){
     super.initState();WidgetsBinding.instance.addObserver(this);
-    resume=widget.magnet.isEmpty?widget.history.position(widget.movie):Duration.zero;
+    _movie=widget.movie;
+    resume=widget.magnet.isEmpty?widget.history.position(_movie):Duration.zero;
     HardwareKeyboard.instance.addHandler(fallbackRemote);
     unawaited(start());
   }
@@ -119,8 +255,8 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     final old=pending;
     final n=++generation;
     cancelAttempt();subtitleRevision++;audioRevision++;recommendedAudioId=null;audioTracks=[];watchdog?.cancel();saveTimer?.cancel();hide?.cancel();
-    if(resetBudget){recovery.reset();lastFault='none';wantsPlayback=true;}
-    nativeState={};
+    if(resetBudget){recovery.reset();lastFault='none';wantsPlayback=_foreground;}
+    nativeState={};_resetNext();
     setState((){busy=true;error=null;progress=0;source=index;controls=true;phase='Opening media';});
     if(old!=null){
       try{await widget.engine.stop();}catch(_){}
@@ -165,7 +301,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   Future<void> attempt(int n,int index,Completer<void> cancel,DateTime overall) async {
     final deadline=DateTime.now().add(const Duration(seconds:65));
-    await widget.engine.start(widget.movie,magnet:widget.magnet,source:index);
+    await widget.engine.start(_movie,magnet:widget.magnet,source:index);
     while(active(n)){
       if(DateTime.now().isAfter(deadline)||DateTime.now().isAfter(overall))throw const PlaybackFailure(PlaybackFault.transient,'Media readiness deadline exceeded');
       final state=await cancellable(widget.engine.status(),cancel);
@@ -215,6 +351,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       recoverRuntime(v.errorDescription??'Playback error');return;
     }
     if(v.position!=lastPosition){lastPosition=v.position;resume=v.position;lastAdvance=DateTime.now();}
+    _sampleNext(c,n);
     if(v.isCompleted){wantsPlayback=false;lastAdvance=DateTime.now();return;}
     if(!wantsPlayback){lastAdvance=DateTime.now();return;}
     if(DateTime.now().difference(lastAdvance)>const Duration(seconds:40)){
@@ -247,13 +384,13 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     }
   }
   Future<void> save(VideoPlayerController c) async {
-    if(widget.magnet.isEmpty&&c.value.isInitialized){try{await widget.history.save(widget.movie,c.value.position,c.value.duration);}catch(_){}}
+    if(widget.magnet.isEmpty&&c.value.isInitialized){try{await widget.history.save(_movie,c.value.position,c.value.duration);}catch(_){}}
   }
   void armControlsTimer(){
     hide?.cancel();
-    if(!closed&&!settingsOpen&&controls&&player?.value.isPlaying==true){
+    if(!closed&&!settingsOpen&&controls&&player?.value.isPlaying==true&&!_nextFocus.hasFocus&&!_creditsFocus.hasFocus){
       hide=Timer(const Duration(seconds:6),(){
-        if(!mounted||closed||settingsOpen||player?.value.isPlaying!=true)return;
+        if(!mounted||closed||settingsOpen||player?.value.isPlaying!=true||_nextFocus.hasFocus||_creditsFocus.hasFocus)return;
         // Keep a focus target mounted even when every control is hidden.
         playerFocus.requestFocus();
         setState(()=>controls=false);
@@ -307,6 +444,13 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       unawaited(seek(key==LogicalKeyboardKey.mediaFastForward?10:-10));
       return KeyEventResult.handled;
     }
+    if(_showNext&&(_nextFocus.hasFocus||_creditsFocus.hasFocus)&&widget.engine.tv){
+      if(!controls&&(key==LogicalKeyboardKey.arrowUp||key==LogicalKeyboardKey.arrowDown)){
+        showControls(focus:true);return KeyEventResult.handled;
+      }
+      if(moveControl(key))return KeyEventResult.handled;
+      return KeyEventResult.ignored;
+    }
     if(!controls){
       if(key==LogicalKeyboardKey.arrowLeft||key==LogicalKeyboardKey.arrowRight){
         unawaited(seek(key==LogicalKeyboardKey.arrowRight?10:-10));return KeyEventResult.handled;
@@ -322,8 +466,9 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   Future<void> setPlaying(bool value) async{
     final c=player;if(c==null||closed||busy)return;
     wantsPlayback=value;lastAdvance=DateTime.now();
+    if(!value){_stopCountdown();_nextGate.reset();_cancelPreparation();if(c.value.isCompleted)setState(()=>_nextDismissed=true);}
     try{
-      if(value){if(c.value.isCompleted)await c.seekTo(Duration.zero);await c.play();}
+      if(value){if(c.value.isCompleted){_markSeek(Duration.zero,c.value.duration);await c.seekTo(Duration.zero);}await c.play();}
       else{await c.pause();}
     }catch(e){if(identical(c,player)&&!closed)recoverRuntime(e);}
     if(identical(c,player))showControls();
@@ -333,6 +478,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     final c=player;if(c==null||closed||busy)return;
     final target=(c.value.position.inMilliseconds+seconds*1000).clamp(0,c.value.duration.inMilliseconds).toInt();
     lastAdvance=DateTime.now();
+    setState(()=>_markSeek(Duration(milliseconds:target),c.value.duration));
     showControls();
     try{await c.seekTo(Duration(milliseconds:target));}
     catch(e){if(!closed&&identical(c,player))recoverRuntime(e);}
@@ -485,10 +631,12 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(index!=null&&!closed)await start(index:index);else showControls();
   }
   @override void didChangeAppLifecycleState(AppLifecycleState state){
-    if(state==AppLifecycleState.paused||state==AppLifecycleState.inactive){wantsPlayback=false;final c=player;if(c!=null){unawaited(c.pause());unawaited(save(c));}}
+    _foreground=state==AppLifecycleState.resumed;
+    if(!_foreground){_stopCountdown();_nextGate.reset();_cancelPreparation();wantsPlayback=false;final c=player;if(c!=null){unawaited(c.pause());unawaited(save(c));}}
+    if(mounted&&!closed)setState((){});
   }
   Future<void> shutdown() async {
-    if(closed)return;closed=true;generation++;subtitleRevision++;cancelAttempt();hide?.cancel();saveTimer?.cancel();watchdog?.cancel();
+    if(closed)return;closed=true;generation++;subtitleRevision++;cancelAttempt();hide?.cancel();saveTimer?.cancel();watchdog?.cancel();_stopCountdown();_cancelPreparation();
     final c=player;player=null;
     if(c!=null){await save(c);await c.dispose();}
     // Cancel engine while a pending initialization/poll is in flight.
@@ -500,7 +648,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(leaving)return;setState(()=>leaving=true);await shutdown();
     if(mounted)Navigator.of(context).pop();
   }
-  @override void dispose(){HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());playerFocus.dispose();for(final node in [playFocus,backFocus,debugFocus,seekFocus,rewindFocus,forwardFocus,ccFocus,audioFocus,sourceFocus]){node.dispose();}super.dispose();}
+  @override void dispose(){HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());playerFocus.dispose();for(final node in [playFocus,backFocus,debugFocus,seekFocus,rewindFocus,forwardFocus,ccFocus,audioFocus,sourceFocus,_nextFocus,_creditsFocus]){node.dispose();}super.dispose();}
   String clock(Duration d){final h=d.inHours,m=d.inMinutes.remainder(60).toString().padLeft(2,'0'),s=d.inSeconds.remainder(60).toString().padLeft(2,'0');return h>0?'$h:$m:$s':'$m:$s';}
   Widget diagnosticsPanel(VideoPlayerValue? v){
     final position=v?.position??resume;
@@ -550,11 +698,36 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         textAlign:TextAlign.center,style:const TextStyle(fontSize:14,color:CinemaColors.muted))),
     ]));
   }
+  Widget nextEpisodeOverlay(){
+    final next=_next!;
+    final tv=widget.engine.tv;
+    final remaining=_countdown;
+    final width=(MediaQuery.sizeOf(context).width*.42).clamp(150.0,tv?300.0:240.0).toDouble();
+    final identity=EpisodeIdentity.parse(next);
+    return Positioned(right:tv?32:12,bottom:controls?(tv?124:108):24,
+      child:ConstrainedBox(constraints:BoxConstraints(maxWidth:width),
+        child:Material(color:const Color(0xF0222220),borderRadius:BorderRadius.circular(12),clipBehavior:Clip.antiAlias,
+          child:Padding(padding:const EdgeInsets.all(10),child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+            if(MediaQuery.sizeOf(context).height>420)AspectRatio(aspectRatio:16/9,child:ClipRRect(borderRadius:BorderRadius.circular(8),
+              child:CinemaArt(next.art,cacheWidth:480))),
+            const SizedBox(height:6),
+            Text('UP NEXT${identity==null?'':' · S${identity.season} E${identity.episode}'}',
+              style:const TextStyle(color:CinemaColors.accent,fontSize:10,fontWeight:FontWeight.w700,letterSpacing:1)),
+            const SizedBox(height:3),
+            Text(next.episodeTitle.isEmpty?next.title:next.episodeTitle,maxLines:2,overflow:TextOverflow.ellipsis,
+              style:TextStyle(fontSize:tv?17:14,fontWeight:FontWeight.w600)),
+            const SizedBox(height:7),
+            if(remaining!=null)LinearProgressIndicator(value:(5-remaining)/5,backgroundColor:const Color(0xFF444444)),
+            const SizedBox(height:7),
+            FilledButton(focusNode:_nextFocus,onPressed:_playNext,child:Text(remaining==null?'Play next':'Next episode in ${remaining}s')),
+            TextButton(focusNode:_creditsFocus,onPressed:_watchCredits,child:const Text('Watch credits')),
+          ])))));
+  }
   Widget progressBar(VideoPlayerController c,VideoPlayerValue v){
     final tv=widget.engine.tv;
     final max=v.duration.inMilliseconds>0?v.duration.inMilliseconds.toDouble():1.0;
     final slider=Slider(value:v.position.inMilliseconds.clamp(0,max).toDouble(),max:max,
-      onChanged:(n){lastAdvance=DateTime.now();unawaited(c.seekTo(Duration(milliseconds:n.round())));showControls();});
+      onChanged:(n){lastAdvance=DateTime.now();final target=Duration(milliseconds:n.round());_markSeek(target,c.value.duration);unawaited(c.seekTo(target));showControls();if(mounted)setState((){});});
     if(!tv)return slider;
     // A TV's slider must not consume up/down as value-changing keys.
     // Own its focus explicitly and keep the underlying touch slider usable.
@@ -623,9 +796,10 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
           padding:EdgeInsets.fromLTRB(widget.engine.tv?24:8,8,widget.engine.tv?24:8,22),
           child:Row(children:[
             controlButton(backFocus,'Back',Icons.arrow_back,leave,compact:true),
-            Expanded(child:Text(widget.movie.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:20,fontWeight:FontWeight.w600))),
+            Expanded(child:Text(_movie.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:20,fontWeight:FontWeight.w600))),
             if(kDebugMode)controlButton(debugFocus,'Playback diagnostics',Icons.bug_report_outlined,showDiagnostics,compact:true),
           ])),top:true)),
+        if(_showNext&&c!=null)nextEpisodeOverlay(),
         if(kDebugMode&&diagnostics&&!leaving)Positioned(top:64,right:16,child:IgnorePointer(child:Container(width:260,padding:const EdgeInsets.all(12),color:const Color(0xE611110F),child:c==null?diagnosticsPanel(null):ValueListenableBuilder<VideoPlayerValue>(valueListenable:c,builder:(_,v,__)=>diagnosticsPanel(v)))))
       ]))))));
   }

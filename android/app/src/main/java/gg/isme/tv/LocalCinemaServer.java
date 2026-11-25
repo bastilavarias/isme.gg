@@ -160,6 +160,26 @@ final class LocalCinemaServer {
             if (path.equals("/api/status") && method.equals("GET")) {
                 sendJson(out, 200, torrents.state()); return;
             }
+            if(path.equals("/api/next/prepare")&&method.equals("POST")){
+                JSONObject body=new JSONObject(new String(data,StandardCharsets.UTF_8));
+                String current=body.optString("currentId",""),next=body.optString("id","");
+                java.util.regex.Pattern pattern=java.util.regex.Pattern.compile("^(imdb:tt[0-9]{7,10}|tmdb:tv:[1-9][0-9]{0,8}):s([0-9]{1,5}):e([0-9]{1,5})$");
+                java.util.regex.Matcher a=pattern.matcher(current),b=pattern.matcher(next);
+                if(!a.matches()||!b.matches()||!a.group(1).equals(b.group(1))||
+                    Integer.parseInt(b.group(2))<Integer.parseInt(a.group(2))||
+                    (a.group(2).equals(b.group(2))&&Integer.parseInt(b.group(3))<=Integer.parseInt(a.group(3)))){
+                    sendJson(out,422,new JSONObject().put("error","Invalid next episode"));return;
+                }
+                final String parent=b.group(1),suffix=":"+b.group(2)+":"+b.group(3);
+                final String access=body.optString("tmdbToken",""),name=body.optString("title",next);
+                boolean accepted=torrents.prepareNext(current,next,()->MediaCatalog.resolve(series.imdbId(parent,access)+suffix,name));
+                sendJson(out,200,new JSONObject().put("accepted",accepted));return;
+            }
+            if(path.equals("/api/next/cancel")&&method.equals("POST")){
+                JSONObject body=new JSONObject(new String(data,StandardCharsets.UTF_8));
+                torrents.cancelNext(body.optString("currentId",""));
+                sendJson(out,200,new JSONObject().put("ok",true));return;
+            }
             if (path.equals("/api/play") && method.equals("POST")) {
                 JSONObject body = new JSONObject(new String(data, StandardCharsets.UTF_8));
                 String id = body.optString("id", "");

@@ -18,6 +18,9 @@ import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Callable;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Android-only torrent engine. Uses libtorrent's native TCP/uTP/UDP/DHT/swarm
@@ -46,6 +49,12 @@ final class TorrentEngine {
     // One in-memory candidate snapshot; never persisted to disk.
     private String choiceId = "";
     private List<MediaCatalog.Source> choiceSnapshot = new ArrayList<>();
+    // One disposable candidate-list preparation. It never starts a torrent
+    // session or downloads media bytes while the current player is active.
+    private FutureTask<List<MediaCatalog.Source>> nextCandidates;
+    private String preparedId = "";
+    private long preparedAt;
+    private static final long PREPARATION_TTL_MS=30*60*1000L;
     private long sequence = 0L;
     private final Object lock = new Object();
 
@@ -55,9 +64,31 @@ final class TorrentEngine {
         removeRecursively(root);
     }
 
+    boolean prepareNext(String current,String next,Callable<List<MediaCatalog.Source>> lookup){
+        synchronized(lock){
+            if(!currentId.equals(current)||!"ready".equals(status)||current.equals(next))return false;
+            if(nextCandidates!=null&&preparedId.equals(next)&&
+                android.os.SystemClock.elapsedRealtime()-preparedAt<PREPARATION_TTL_MS)return true;
+            discardPreparationLocked();
+            preparedId=next;
+            preparedAt=android.os.SystemClock.elapsedRealtime();
+            nextCandidates=new FutureTask<>(lookup);
+            Thread worker=new Thread(nextCandidates,"isme-next-preparation");
+            worker.setDaemon(true);worker.setPriority(Thread.MIN_PRIORITY);worker.start();
+            return true;
+        }
+    }
+    void cancelNext(String current){
+        synchronized(lock){if(currentId.equals(current))discardPreparationLocked();}
+    }
+    private void discardPreparationLocked(){
+        if(nextCandidates!=null)nextCandidates.cancel(true);
+        nextCandidates=null;preparedId="";preparedAt=0;
+    }
     void start(String id, String name, int sourceIndex, String directMagnet, String episodeKey) {
         final long token;
         final List<MediaCatalog.Source> prior;
+        final FutureTask<List<MediaCatalog.Source>> warmed;
         synchronized (lock) {
             // Reuse the exact candidate snapshot for retries of the same title.
             prior = id.equals(choiceId) && (directMagnet == null || directMagnet.isEmpty())
@@ -65,6 +96,11 @@ final class TorrentEngine {
             if (!id.equals(choiceId) || (directMagnet != null && !directMagnet.isEmpty())) {
                 choiceId = ""; choiceSnapshot.clear();
             }
+            if((directMagnet==null||directMagnet.isEmpty())&&nextCandidates!=null&&preparedId.equals(id)&&
+                android.os.SystemClock.elapsedRealtime()-preparedAt<PREPARATION_TTL_MS){
+                warmed=nextCandidates;
+                nextCandidates=null;preparedId="";preparedAt=0;
+            }else{discardPreparationLocked();warmed=null;}
             stopLocked();
             token = ++sequence;
             currentId = id;
@@ -91,7 +127,13 @@ final class TorrentEngine {
                     if (!imdb.matches("tt[0-9]{7,10}(?::[0-9]{1,5}:[0-9]{1,5})?"))
                         throw new IOException("This title has no supported media ID");
                     resolvedImdb = imdb;
-                    found = prior.isEmpty() ? MediaCatalog.resolve(imdb, name) : prior;
+                    found=prior;
+                    if(found.isEmpty()&&warmed!=null){
+                        try{found=warmed.get(12,TimeUnit.SECONDS);}
+                        catch(Exception ignored){warmed.cancel(true);}
+                    }
+                    synchronized(lock){if(token!=sequence)return;}
+                    if(found.isEmpty())found=MediaCatalog.resolve(imdb,name);
                 }
                 if (found.isEmpty()) throw new IOException("No matching torrent sources found");
                 if (sourceIndex < 0 || sourceIndex >= found.size()) throw new IOException("Source index unavailable");
@@ -279,7 +321,7 @@ final class TorrentEngine {
         }
     }
 
-    void stop() { synchronized (lock) { stopLocked(); sequence++; } }
+    void stop() { synchronized (lock) { discardPreparationLocked(); stopLocked(); sequence++; } }
 
     private void stopLocked() {
         SessionManager previous = session;

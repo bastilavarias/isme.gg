@@ -251,11 +251,12 @@ class _CinemaHomeState extends State<CinemaHome> {
     final rect=origin & anchor.size;
     final v=await showMenu<String>(context:context,
       position:RelativeRect.fromRect(rect,Offset.zero & overlay.size),
-      items:const [
-        PopupMenuItem(value:'source',child:Text('Open source')),
-        PopupMenuItem(value:'refresh',child:Text('Refresh catalog')),
-        PopupMenuItem(value:'providers',child:Text('TMDB / streaming availability')),
-        PopupMenuItem(value:'update',child:Text('Check updates')),
+      items:[
+        const PopupMenuItem(value:'source',child:Text('Open source')),
+        const PopupMenuItem(value:'refresh',child:Text('Refresh catalog')),
+        const PopupMenuItem(value:'providers',child:Text('TMDB / streaming availability')),
+        PopupMenuItem(value:'autoplay',child:Text('Autoplay next: ${(widget.history.prefs.getBool('isme-autoplay-next')??true)?'On':'Off'}')),
+        const PopupMenuItem(value:'update',child:Text('Check updates')),
       ]);
     if(!mounted)return;
     menuNav.requestFocus();
@@ -263,6 +264,12 @@ class _CinemaHomeState extends State<CinemaHome> {
     if(v=='source'){await manual();}
     else if(v=='refresh'){await load(force:true);}
     else if(v=='providers'){await providerSettings();}
+    else if(v=='autoplay'){
+      final prefs=widget.history.prefs;
+      final enabled=!(prefs.getBool('isme-autoplay-next')??true);
+      await prefs.setBool('isme-autoplay-next',enabled);
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(enabled?'Autoplay enabled':'Autoplay disabled')));
+    }
     else{
       try{await engine.checkUpdates();}
       catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Updates not configured in this development build.')));}

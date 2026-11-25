@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ismegg/engine.dart';
@@ -14,6 +15,43 @@ class SeriesEngine extends NativeEngine {
   ];
 }
 void main(){
+  test('placeholder episode titles are not repeated',(){
+    expect(distinctEpisodeTitle(const Episode(number:1,title:'Episode 1')),isEmpty);
+    expect(distinctEpisodeTitle(const Episode(number:2,title:' EP. 2 ')),isEmpty);
+    expect(distinctEpisodeTitle(const Episode(number:3,title:'Pilot')), 'Pilot');
+  });
+  testWidgets('episode release date includes month name and year',(tester)async{
+    late String label;
+    await tester.pumpWidget(MaterialApp(home:Builder(builder:(context){
+      label=episodeDateLabel(context,'2026-11-11');
+      return const SizedBox();
+    })));
+    expect(label,contains('Nov'));
+    expect(label,contains('2026'));
+  });
+  testWidgets('episode rail expands only the focused card',(tester)async{
+    SharedPreferences.setMockInitialValues({});
+    final engine=SeriesEngine();addTearDown(engine.dispose);
+    await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:SeriesPage(
+      show:const Movie(id:'tmdb:tv:123',title:'Example',type:'Series',tmdbId:123),
+      engine:engine,history:History(await SharedPreferences.getInstance()))));
+    await tester.pumpAndSettle();
+    double? width(int n)=>tester.widget<AnimatedContainer>(find.byKey(ValueKey('episode-size-$n'))).constraints?.maxWidth;
+    expect(width(1),100);
+    expect(width(2),100);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(width(1),252);
+    expect(width(2),100);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(width(1),100);
+    expect(width(2),252);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(width(2),100);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
   test('legacy movie records remain movies and typed series retain IDs',(){
     final movie=Movie.fromJson({'id':'imdb:tt1234567','title':'Movie'});
     expect(movie.episodic,isFalse);
