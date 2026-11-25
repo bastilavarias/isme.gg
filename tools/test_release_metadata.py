@@ -8,18 +8,20 @@ from zipfile import ZipFile
 import release_metadata as release
 
 BADGING = ("package: name='gg.isme.tv.flutter' versionCode='5' versionName='0.5.0'\n"
-           "sdkVersion:'28'\nleanback-launchable-activity: name='gg.isme.tv.MainActivity'\n")
+           "minSdkVersion:'28'\nleanback-launchable-activity: name='gg.isme.tv.MainActivity'\n")
 SIGNER = "a" * 64
 
 
 class ReleaseMetadataTest(unittest.TestCase):
     def test_correct_badging(self):
-        self.assertEqual(release.validate_badging(BADGING, "0.5.0", 5), 28)
+        for badging in (BADGING, BADGING.replace("minSdkVersion", "sdkVersion")):
+            with self.subTest(badging=badging):
+                self.assertEqual(release.validate_badging(badging, "0.5.0", 5), 28)
 
     def test_reject_mismatched_version_package_sdk_and_tv_launcher(self):
         for invalid in (BADGING.replace("versionCode='5'", "versionCode='4'"),
                         BADGING.replace("gg.isme.tv.flutter", "gg.isme.tv.flutter.debug"),
-                        BADGING.replace("sdkVersion:'28'", "sdkVersion:'29'"),
+                        BADGING.replace("minSdkVersion:'28'", "minSdkVersion:'29'"),
                         BADGING.split("leanback-launchable-activity")[0]):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 release.validate_badging(invalid, "0.5.0", 5)

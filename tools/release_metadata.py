@@ -20,7 +20,7 @@ def validate_badging(badging, version, code):
     package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging, re.M)
     if not package or package.groups() != (PACKAGE, str(code), version):
         raise ValueError("APK package or version differs from release metadata")
-    minimum = re.search(r"^sdkVersion:'(\d+)'", badging, re.M)
+    minimum = re.search(r"^(?:minSdkVersion|sdkVersion):'(\d+)'", badging, re.M)
     if not minimum or int(minimum[1]) != 28:
         raise ValueError("Unexpected minimum Android SDK")
     if "android.intent.category.LEANBACK_LAUNCHER" not in badging and "leanback-launchable-activity:" not in badging:
