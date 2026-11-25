@@ -30,6 +30,8 @@ import java.util.concurrent.Executors;
 final class LocalCinemaServer {
     private final Context context;
     private final TorrentEngine torrents;
+    private final CatalogCache metadata;
+    private final WatchProviders providers;
     private final SubtitleSupport subtitles = new SubtitleSupport();
     private final ExecutorService workers = Executors.newFixedThreadPool(8);
     private final ServerSocket listener;
@@ -41,6 +43,8 @@ final class LocalCinemaServer {
     LocalCinemaServer(Context context, boolean devMode) throws Exception {
         this.context = context.getApplicationContext();
         this.torrents = new TorrentEngine(context.getCacheDir());
+        this.metadata = new CatalogCache(this.context);
+        this.providers = new WatchProviders(metadata);
         listener = new ServerSocket();
         // Fixed only in explicit debug mode so Windows adb forward can access the
         // on-device torrent API without rebuilding the APK for Vite changes.
@@ -131,8 +135,13 @@ final class LocalCinemaServer {
                     .put("origin", "localhost")); return;
             }
             if (path.equals("/api/catalog") && method.equals("GET")) {
-                sendJson(out, 200, MediaCatalog.catalog(context, query.getOrDefault("collection", "trending"),
-                    query.getOrDefault("query", ""))); return;
+                sendJson(out, 200, metadata.catalog(context, query.getOrDefault("collection", "trending"),
+                    query.getOrDefault("query", ""), query.getOrDefault("mode", "normal"))); return;
+            }
+            if (path.equals("/api/providers") && method.equals("POST")) {
+                JSONObject body = new JSONObject(new String(data, StandardCharsets.UTF_8));
+                sendJson(out, 200, providers.lookup(body.optString("imdb",""),
+                    body.optInt("tmdbId",0),body.optString("country",""),body.optString("token",""))); return;
             }
             if (path.equals("/api/status") && method.equals("GET")) {
                 sendJson(out, 200, torrents.state()); return;
@@ -256,5 +265,6 @@ final class LocalCinemaServer {
         torrents.stop();
         try { listener.close(); } catch (IOException ignored) {}
         workers.shutdownNow();
+        metadata.close();
     }
 }

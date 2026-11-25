@@ -1,21 +1,32 @@
 import 'dart:convert';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class Movie {
   final String id, title, description, poster, backdrop;
   final String year, genre, runtime, rating;
-  const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = '', this.genre = '', this.runtime = '', this.rating = ''});
+  final int tmdbId;
+  const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = '', this.genre = '', this.runtime = '', this.rating = '', this.tmdbId = 0});
   static String _field(dynamic value) => value == null ? '' : value.toString().trim();
   static String _genre(dynamic value) => value is List ? value.take(2).map(_field).where((s)=>s.isNotEmpty).join(', ') : _field(value);
   String get metadata => ['Movie',genre,year,runtime,rating].where((s)=>s.isNotEmpty).join(' · ');
   factory Movie.fromJson(Map<String, dynamic> j) => Movie(
     id: j['id']?.toString() ?? '', title: j['title']?.toString() ?? '',
     description: j['description']?.toString() ?? '', poster: j['poster']?.toString() ?? '',
-    backdrop: _field(j['backdrop']), year: _field(j['year']), genre: _genre(j['genres']??j['genre']), runtime: _field(j['runtime']), rating: _field(j['ratingLabel']));
-  Map<String, dynamic> toJson() => {'id':id,'title':title,'description':description,'poster':poster,'backdrop':backdrop,'year':year,'genre':genre,'runtime':runtime,'ratingLabel':rating};
+    backdrop: _field(j['backdrop']), year: _field(j['year']), genre: _genre(j['genres']??j['genre']), runtime: _field(j['runtime']), rating: _field(j['ratingLabel']), tmdbId: int.tryParse(_field(j['tmdbId']))??0);
+  Map<String, dynamic> toJson() => {'id':id,'title':title,'description':description,'poster':poster,'backdrop':backdrop,'year':year,'genre':genre,'runtime':runtime,'ratingLabel':rating,'tmdbId':tmdbId};
   String get art => backdrop.isNotEmpty ? backdrop : poster;
+}
+class CatalogSnapshot {
+  final List<Movie> movies;
+  final bool cacheHit, stale;
+  const CatalogSnapshot(this.movies,{required this.cacheHit,required this.stale});
+  factory CatalogSnapshot.fromJson(Map<String,dynamic> data)=>CatalogSnapshot(
+    (data['items'] as List? ?? []).whereType<Map<String,dynamic>>().map(Movie.fromJson)
+      .where((m)=>m.id.isNotEmpty&&m.title.isNotEmpty).toList(),
+    cacheHit:data['cacheHit']==true,stale:data['stale']==true);
 }
 class NativeEngine {
   static const channel = MethodChannel('gg.isme/native');
@@ -23,6 +34,49 @@ class NativeEngine {
   late final Uri origin;
   late final String token;
   bool tv = false;
+  String providerCountry='PH';
+  String _providerToken='';
+  final providerRevision=ValueNotifier<int>(0);
+  final _providerMemo=<String,({Future<String?> value,DateTime until})>{};
+  final _providerLanes=<Future<void>>[Future.value(),Future.value()];
+  int _providerLane=0;
+  bool _disposed=false, _providerBlocked=false;
+  bool get providersConfigured=>_providerToken.isNotEmpty;
+  void configureProviders(String country,String token){
+    providerCountry=country.toUpperCase();
+    _providerToken=token.trim();
+    _providerBlocked=false;
+    _providerMemo.clear();
+    providerRevision.value++;
+  }
+  Future<String?> providerFor(Movie movie){
+    if(_disposed||!RegExp(r'^imdb:tt[0-9]{7,10}$').hasMatch(movie.id))return Future.value(null);
+    final old=_providerMemo[movie.id];
+    if(old!=null&&DateTime.now().isBefore(old.until))return old.value;
+    final revision=providerRevision.value, country=providerCountry, token=_providerToken;
+    final lane=_providerLane++%_providerLanes.length;
+    final result=_providerLanes[lane].then<String?>((_)async{
+      if(_disposed||revision!=providerRevision.value)return null;
+      try{
+        final data=await json('/api/providers',body:{
+          'imdb':movie.id.substring(5),'tmdbId':movie.tmdbId,'country':country,
+          'token':_providerBlocked?'':token,
+        });
+        if(_disposed||revision!=providerRevision.value)return null;
+        final name=data['provider']?.toString().trim()??'';
+        return name.isEmpty?null:name;
+      }catch(e){
+        if(!_disposed&&revision==providerRevision.value){
+          if(RegExp(r'HTTP (401|403|429)').hasMatch(e.toString()))_providerBlocked=true;
+        }
+        return null;
+      }
+    });
+    _providerLanes[lane]=result.then<void>((_){});
+    _providerMemo[movie.id]=(value:result,until:DateTime.now().add(const Duration(minutes:15)));
+    if(_providerMemo.length>300)_providerMemo.remove(_providerMemo.keys.first);
+    return result;
+  }
   Map<String,String> get headers => {'x-isme-token': token};
   Future<void> connect() async {
     final result = await channel.invokeMapMethod<String,dynamic>('connect');
@@ -41,10 +95,10 @@ class NativeEngine {
     if (res.statusCode >= 400) throw StateError(data['error']?.toString() ?? 'Request failed');
     return data;
   }
-  Future<List<Movie>> catalog(String collection, {String query = ''}) async {
-    final data = await json('/api/catalog', query: {'collection':collection,'query':query});
-    return (data['items'] as List? ?? []).whereType<Map<String,dynamic>>().map(Movie.fromJson).where((m)=>m.id.isNotEmpty && m.title.isNotEmpty).toList();
-  }
+  Future<CatalogSnapshot> catalogSnapshot(String collection,{String mode='normal',String query=''}) async =>
+    CatalogSnapshot.fromJson(await json('/api/catalog',query:{'collection':collection,'query':query,'mode':mode}));
+  Future<List<Movie>> catalog(String collection, {String query = ''}) async =>
+    (await catalogSnapshot(collection,query:query)).movies;
   Future<void> start(Movie movie, {String magnet = '', int source = 0}) async {
     await json('/api/play',body:{'id':movie.id,'title':movie.title,'magnet':magnet,'sourceIndex':source});
   }
@@ -87,7 +141,7 @@ class NativeEngine {
     return utf8.decode(res.bodyBytes);
   }
   Future<void> checkUpdates() => channel.invokeMethod<void>('checkUpdates');
-  void dispose() => _client.close();
+  void dispose(){_disposed=true;_providerMemo.clear();_client.close();providerRevision.dispose();}
 }
 class History {
   final SharedPreferences prefs;

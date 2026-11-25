@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'design.dart';
 import 'engine.dart';
+import 'platform_pill.dart';
 
 /// Remember a row's cursor, but expand only the card with actual focus.
 class CinemaShelf extends StatefulWidget {
@@ -10,8 +11,9 @@ class CinemaShelf extends StatefulWidget {
   final ValueChanged<Movie> onHighlight, onOpen;
   final ValueChanged<bool>? onVertical;
   final VoidCallback? onRowFocus;
+  final NativeEngine? engine;
   const CinemaShelf({super.key, required this.title, required this.movies,
-    required this.onHighlight, required this.onOpen, this.onVertical, this.onRowFocus});
+    required this.onHighlight, required this.onOpen, this.onVertical, this.onRowFocus, this.engine});
   @override CinemaShelfState createState() => CinemaShelfState();
 }
 
@@ -148,6 +150,7 @@ class CinemaShelfState extends State<CinemaShelf> {
                         if (expanded || movie.poster.isEmpty) Positioned(left: 10, right: 10, bottom: 10,
                           child: Text(movie.title, maxLines: 2, overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: expanded ? 23 : 14, fontWeight: FontWeight.w700))),
+                        if(widget.engine!=null) Positioned(top:5,left:5,child:PlatformPill(engine:widget.engine!,movie:movie)),
                         if (expanded) const Positioned(top: 10, right: 10,
                           child: Icon(Icons.play_circle_fill, size: 26, color: CinemaColors.ink)),
                       ]))));

@@ -6,6 +6,8 @@ import 'design.dart';
 import 'cinema_shelf.dart';
 import 'engine.dart';
 import 'player.dart';
+import 'platform_pill.dart';
+import 'search_page.dart';
 
 void main(){ WidgetsFlutterBinding.ensureInitialized(); PaintingBinding.instance.imageCache.maximumSizeBytes=48*1024*1024; PaintingBinding.instance.imageCache.maximumSize=120; runApp(const IsmeApp()); }
 class IsmeApp extends StatefulWidget {
@@ -17,7 +19,7 @@ class _IsmeAppState extends State<IsmeApp> {
   @override void initState(){super.initState();boot();}
   Future<void> boot() async {
     final e=NativeEngine();
-    try {await e.connect(); final h=History(await SharedPreferences.getInstance());if(!mounted){e.dispose();return;}setState((){engine=e;history=h;error=null;});}
+    try {await e.connect(); final h=History(await SharedPreferences.getInstance());final country=h.prefs.getString('isme-provider-country')??'PH';if(RegExp(r'^[A-Z]{2}$').hasMatch(country))e.providerCountry=country;if(!mounted){e.dispose();return;}setState((){engine=e;history=h;error=null;});}
     catch(err){e.dispose();if(mounted)setState(()=>error=err.toString());}
   }
   @override void dispose(){engine?.dispose();super.dispose();}
@@ -46,6 +48,7 @@ class _CinemaHomeState extends State<CinemaHome> {
     menuNav=FocusNode(debugLabel:'Menu'), heroFocus=FocusNode(debugLabel:'Hero watch');
   final rowKeys=<String,GlobalKey<CinemaShelfState>>{};
   final menuAnchor=GlobalKey();
+  final searchPageKey=GlobalKey<CinemaSearchPageState>();
   List<String> get visibleRows=>[
     if(widget.history.movies().isNotEmpty)'Continue watching',
     for(final entry in collections.entries)if(shelves[entry.key]?.isNotEmpty==true)entry.value,
@@ -76,8 +79,10 @@ class _CinemaHomeState extends State<CinemaHome> {
   KeyEventResult navKeys(FocusNode node,KeyEvent event){
     if(!engine.tv||event is! KeyDownEvent&&event is! KeyRepeatEvent)return KeyEventResult.ignored;
     final key=event.logicalKey;
-    if(key==LogicalKeyboardKey.arrowDown&&!searching){
-      focusHero();return KeyEventResult.handled;
+    if(key==LogicalKeyboardKey.arrowDown){
+      if(searching){searchPageKey.currentState?.focusKeyboard();}
+      else{focusHero();}
+      return KeyEventResult.handled;
     }
     if(key==LogicalKeyboardKey.arrowLeft||key==LogicalKeyboardKey.arrowRight){
       final nodes=[homeNav,searchNav,menuNav];
@@ -95,25 +100,76 @@ class _CinemaHomeState extends State<CinemaHome> {
     }
     return KeyEventResult.ignored;
   }
-  Timer? debounce;int generation=0;bool searching=false;bool loading=true;bool searchBusy=false;List<Movie> results=[];String? searchError;
+  Timer? debounce;int generation=0, catalogGeneration=0;bool searching=false;bool loading=true;bool searchBusy=false;List<Movie> results=[];String? searchError;
   NativeEngine get engine=>widget.engine;
   @override void initState(){super.initState();load();}
-  Future<void> load() async {
-    setState((){loading=true;failures.clear();});
+  Future<void> load({bool force=false}) async {
+    final run=++catalogGeneration;
+    bool current()=>mounted&&run==catalogGeneration;
+    void apply(String key,List<Movie> items){
+      if(!current()||items.isEmpty)return;
+      final row=rowKeys[collections[key]]?.currentState;
+      // Keep the focused rail stable while an API refresh finishes.
+      if(row?.hasActiveFocus==true&&shelves[key]?.isNotEmpty==true)return;
+      setState(()=>shelves[key]=items);
+      if(selected.value==null&&items.isNotEmpty)selected.value=items.first;
+    }
+    setState((){loading=shelves.isEmpty;failures.clear();});
     await Future.wait(collections.keys.map((key) async {
-      try{final items=await engine.catalog(key);if(!mounted)return;setState(()=>shelves[key]=items);if(key=='trending'&&selected.value==null&&items.isNotEmpty)selected.value=items.first;}
-      catch(e){if(mounted)setState(()=>failures[key]='Could not load this collection');}
+      CatalogSnapshot? cached;
+      try{
+        cached=await engine.catalogSnapshot(key,mode:'cached');
+        if(!current())return;
+        if(cached.cacheHit)apply(key,cached.movies);
+      }catch(_){}
+      if(!current()||(!force&&cached?.cacheHit==true&&cached?.stale==false))return;
+      try{
+        final live=await engine.catalogSnapshot(key,mode:force?'refresh':'normal');
+        if(!current())return;
+        apply(key,live.movies);
+      }catch(_){
+        if(current()&&shelves[key]?.isNotEmpty!=true)setState(()=>failures[key]='Could not load this collection');
+      }
     }));
-    if(mounted){if(selected.value==null){for(final items in shelves.values){if(items.isNotEmpty){selected.value=items.first;break;}}}setState(()=>loading=false);}
+    if(current())setState(()=>loading=false);
+  }
+  List<Movie> uniqueMovies(Iterable<Movie> movies,{int limit=100}){
+    final seen=<String>{};
+    return movies.where((m)=>seen.add(m.id)).take(limit).toList();
+  }
+  List<Movie> get popularMovies=>uniqueMovies([
+    ...?shelves['trending'],...?shelves['pinoy'],...?shelves['korean'],...?shelves['english'],
+  ],limit:30);
+  List<Movie> localMatches(String text){
+    final needle=text.trim().toLowerCase();
+    if(needle.isEmpty)return [];
+    final movies=uniqueMovies([
+      ...widget.history.movies(),...shelves.values.expand((row)=>row),
+    ],limit:1000).where((m)=>m.title.toLowerCase().contains(needle)).toList();
+    // Exact and prefix matches lead, preserving catalog order within each group.
+    int rank(Movie m)=>m.title.toLowerCase()==needle?0:m.title.toLowerCase().startsWith(needle)?1:2;
+    return [for(int r=0;r<3;r++)...movies.where((m)=>rank(m)==r)].take(50).toList();
   }
   void query(String text){
     debounce?.cancel();final n=++generation;
-    setState((){searchBusy=text.trim().isNotEmpty;searchError=null;results=[];});
-    if(text.trim().isEmpty)return;
+    final needle=text.trim();
+    setState((){searchBusy=needle.isNotEmpty;searchError=null;results=localMatches(needle);});
+    if(needle.isEmpty)return;
     debounce=Timer(const Duration(milliseconds:350),()async{
-      try{final items=await engine.catalog('trending',query:text.trim());if(mounted&&n==generation)setState(()=>results=items);}
-      catch(_){if(mounted&&n==generation)setState(()=>searchError='Search unavailable. Try again.');}
+      try{
+        final items=await engine.catalog('trending',query:needle);
+        if(mounted&&n==generation)setState(()=>results=uniqueMovies([...results,...localMatches(needle),...items]));
+      }catch(_){if(mounted&&n==generation){
+        final saved=uniqueMovies([...results,...localMatches(needle)]);
+        setState((){results=saved;searchError=saved.isEmpty?'Search unavailable. Try again.':'Showing saved catalog results';});
+      }}
       finally{if(mounted&&n==generation)setState(()=>searchBusy=false);}
+    });
+  }
+  void showSearch(){
+    setState(()=>searching=true);
+    if(engine.tv)WidgetsBinding.instance.addPostFrameCallback((_){
+      if(mounted&&searching)searchPageKey.currentState?.focusKeyboard();
     });
   }
   Future<void> open(Movie m) async {
@@ -144,7 +200,7 @@ class _CinemaHomeState extends State<CinemaHome> {
         Row(mainAxisSize:MainAxisSize.min,children:[
           navButton('Home',homeNav,!searching,(){setState(()=>searching=false);scrollTop();}),
           const SizedBox(width:8),
-          navButton('Search',searchNav,searching,()=>setState(()=>searching=true)),
+          navButton('Search',searchNav,searching,showSearch),
         ]),
         Align(alignment:Alignment.centerRight,child:IconButton(key:menuAnchor,focusNode:menuNav,tooltip:'Menu',onPressed:openNavMenu,icon:const Icon(Icons.more_vert)))
       ])));
@@ -170,35 +226,68 @@ class _CinemaHomeState extends State<CinemaHome> {
       items:const [
         PopupMenuItem(value:'source',child:Text('Open source')),
         PopupMenuItem(value:'refresh',child:Text('Refresh catalog')),
+        PopupMenuItem(value:'providers',child:Text('Streaming availability')),
         PopupMenuItem(value:'update',child:Text('Check updates')),
       ]);
     if(!mounted)return;
     menuNav.requestFocus();
     if(v==null)return;
     if(v=='source'){await manual();}
-    else if(v=='refresh'){await load();}
+    else if(v=='refresh'){await load(force:true);}
+    else if(v=='providers'){await providerSettings();}
     else{
       try{await engine.checkUpdates();}
       catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Updates not configured in this development build.')));}
     }
   }
+  Future<void> providerSettings() async {
+    final region=TextEditingController(text:engine.providerCountry);
+    final token=TextEditingController();
+    String? validation;
+    final value=await showDialog<Map<String,String>>(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,update)=>AlertDialog(
+      title:const Text('Streaming availability'),
+      content:SingleChildScrollView(child:SizedBox(width:390,child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+        const Text('Show a small badge when one subscription provider is listed in your region.'),
+        const SizedBox(height:12),
+        TextField(controller:region,maxLength:2,textCapitalization:TextCapitalization.characters,decoration:const InputDecoration(labelText:'Country code (e.g. PH, US)')),
+        TextField(controller:token,obscureText:true,enableSuggestions:false,autocorrect:false,decoration:const InputDecoration(labelText:'TMDB API read access token')),
+        const SizedBox(height:8),
+        Text(engine.providersConfigured?'A token is active for this session.':'Enter a read token to fetch new availability. Cached badges work without a token.'),
+        const Text('Token stays in memory until the app closes. Data from JustWatch via TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',style:TextStyle(fontSize:12,color:CinemaColors.muted)),
+        if(validation!=null)Text(validation!,style:const TextStyle(color:CinemaColors.accent)),
+      ]))),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Cancel')),
+        TextButton(onPressed:()=>Navigator.pop(ctx,{'country':engine.providerCountry,'token':''}),child:const Text('Clear token')),
+        FilledButton(onPressed:(){
+          final code=region.text.trim().toUpperCase(),readToken=token.text.trim();
+          if(!RegExp(r'^[A-Z]{2}$').hasMatch(code)||readToken.length>2048||(readToken.isNotEmpty&&!RegExp(r'^[A-Za-z0-9._~+/-]+=*$').hasMatch(readToken))){update(()=>validation='Enter a valid country code and read token.');return;}
+          Navigator.pop(ctx,{'country':code,'token':readToken});
+        },child:const Text('Apply')),
+      ],
+    )));
+    region.dispose();token.dispose();
+    if(!mounted||value==null)return;
+    final country=value['country']!;
+    await widget.history.prefs.setString('isme-provider-country',country);
+    if(!mounted)return;
+    engine.configureProviders(country,value['token']!);
+    menuNav.requestFocus();
+  }
+  Widget providerCredit()=>const Padding(padding:EdgeInsets.symmetric(horizontal:16,vertical:8),
+    child:Text('Streaming availability: JustWatch via TMDB',style:TextStyle(fontSize:10,color:CinemaColors.muted)));
   Widget navButton(String label,FocusNode node,bool active,VoidCallback action)=>TextButton(
     focusNode:node,onFocusChange:(focused){if(focused&&!searching)scrollTop();},
     onPressed:action,style:TextButton.styleFrom(backgroundColor:active?const Color(0x33444444):Colors.transparent,
       foregroundColor:active?CinemaColors.accent:CinemaColors.ink,padding:const EdgeInsets.symmetric(horizontal:18,vertical:12)),
     child:Text(label));
-  Widget buildSearch(bool tv)=>Padding(padding:EdgeInsets.symmetric(horizontal:tv?40:16),child:Column(children:[
-    TextField(controller:search,onChanged:query,decoration:const InputDecoration(prefixIcon:Icon(Icons.search),hintText:'Find a movie')),
-    const SizedBox(height:16),
-    if(searchBusy)const LinearProgressIndicator(),
-    if(searchError!=null)Text(searchError!),
-    if(!searchBusy&&results.isEmpty&&search.text.isNotEmpty&&searchError==null)const Text('No results'),
-    Expanded(child:GridView.builder(gridDelegate:SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent:tv?200:150,childAspectRatio:0.65,mainAxisSpacing:10,crossAxisSpacing:10),itemCount:results.length,itemBuilder:(_,i)=>poster(results[i],tv)))
-  ]));
+  Widget buildSearch(bool tv)=>CinemaSearchPage(key:searchPageKey,engine:engine,controller:search,
+    movies:search.text.trim().isEmpty?popularMovies:results,busy:searchBusy||(search.text.trim().isEmpty&&loading),
+    error:searchError,onQuery:query,onOpen:open,onNav:()=>searchNav.requestFocus());
   Widget poster(Movie m,bool tv)=>RemoteTile(label:m.title,onPressed:()=>open(m),onFocused:()=>selected.value=m,child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-    Expanded(child:CinemaArt(m.poster)),Padding(padding:const EdgeInsets.all(5),child:Text(m.title,maxLines:1,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?15:12)))
+    Expanded(child:Stack(fit:StackFit.expand,children:[CinemaArt(m.poster),Positioned(top:5,left:5,child:PlatformPill(engine:engine,movie:m))])),Padding(padding:const EdgeInsets.all(5),child:Text(m.title,maxLines:1,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?15:12)))
   ]));
-  Widget shelf(String name,List<Movie> movies,bool tv)=>tv?CinemaShelf(key:rowKeys.putIfAbsent(name,()=>GlobalKey<CinemaShelfState>()),title:name,movies:movies,onHighlight:(m)=>selected.value=m,onOpen:open,onVertical:(down)=>moveRow(name,down),onRowFocus:()=>revealRow(name)):Padding(padding:const EdgeInsets.only(bottom:22),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+  Widget shelf(String name,List<Movie> movies,bool tv)=>tv?CinemaShelf(key:rowKeys.putIfAbsent(name,()=>GlobalKey<CinemaShelfState>()),title:name,movies:movies,engine:engine,onHighlight:(m)=>selected.value=m,onOpen:open,onVertical:(down)=>moveRow(name,down),onRowFocus:()=>revealRow(name)):Padding(padding:const EdgeInsets.only(bottom:22),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     Padding(padding:EdgeInsets.symmetric(horizontal:tv?40:16),child:Text(name,style:TextStyle(fontSize:tv?22:19,fontWeight:FontWeight.w700))),
     const SizedBox(height:10),
     SizedBox(height:tv?204:175,child:ListView.builder(scrollDirection:Axis.horizontal,padding:EdgeInsets.symmetric(horizontal:tv?40:16),itemCount:movies.length,itemBuilder:(_,i)=>Padding(padding:const EdgeInsets.only(right:10),child:SizedBox(width:tv?132:112,child:poster(movies[i],tv)))))
@@ -214,7 +303,8 @@ class _CinemaHomeState extends State<CinemaHome> {
       if(widget.history.movies().isNotEmpty)shelf('Continue watching',widget.history.movies(),tv),
       for(final entry in collections.entries)
         if(shelves[entry.key]?.isNotEmpty==true)shelf(entry.value,shelves[entry.key]!,tv)
-        else if(failures.containsKey(entry.key))Padding(padding:const EdgeInsets.all(16),child:TextButton(onPressed:load,child:Text('Retry ${entry.value}')))
+        else if(failures.containsKey(entry.key))Padding(padding:const EdgeInsets.all(16),child:TextButton(onPressed:()=>load(force:true),child:Text('Retry ${entry.value}'))),
+      providerCredit(),
     ]));
   Widget hero(Movie m,bool tv)=>Stack(children:[
     if(!tv) Positioned.fill(child:Stack(fit:StackFit.expand,children:[
