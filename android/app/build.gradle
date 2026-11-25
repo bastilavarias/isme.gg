@@ -14,6 +14,7 @@ def releaseStorePassword = System.getenv("ISME_KEYSTORE_PASSWORD") ?: releaseKey
 def releaseAlias = System.getenv("ISME_KEY_ALIAS") ?: releaseKeys.getProperty("keyAlias")
 def releaseKeyPassword = System.getenv("ISME_KEY_PASSWORD") ?: releaseKeys.getProperty("keyPassword")
 def releaseSigningReady = [releaseStore, releaseStorePassword, releaseAlias, releaseKeyPassword].every { it }
+def releaseAbis = ["arm64-v8a", "armeabi-v7a"]
 
 android {
     namespace "gg.isme.tv"
@@ -27,7 +28,7 @@ android {
         versionName flutter.versionName
         ndk {
             abiFilters.clear()
-            abiFilters "arm64-v8a", "armeabi-v7a"
+            abiFilters.addAll(releaseAbis)
         }
         buildConfigField "String", "RELEASE_REPO", '""'
     }
@@ -45,6 +46,11 @@ android {
     buildTypes {
         debug { applicationIdSuffix ".debug" }
         release {
+            // Flutter 3.38 sets default ABI filters on the build type.
+            ndk {
+                abiFilters.clear()
+                abiFilters.addAll(releaseAbis)
+            }
             buildConfigField "String", "RELEASE_REPO", '"bastilavarias/isme.gg"'
             if (releaseSigningReady) signingConfig signingConfigs.release
         }
