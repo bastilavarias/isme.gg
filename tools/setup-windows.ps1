@@ -374,7 +374,7 @@ try {
     Assert-CleanTracked $git 'after dependencies'
     if ($BuildOnly) {
         Write-Host '[5/5] Building debug APK without installing...' -ForegroundColor Cyan
-        Invoke-Checked $flutter @('build','apk','--debug','--no-pub','--target-platform','android-arm,android-arm64')
+        Invoke-Checked $flutter @('build','apk','--debug','--no-pub','--target-platform','android-arm,android-arm64,android-x64')
         Assert-CleanTracked $git 'after debug build'
         Write-Host 'Build complete; tracked checkout remains clean.' -ForegroundColor Green
         exit 0

@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,17 +57,32 @@ def check_clean(root=ROOT):
         raise ValueError("Build changed tracked files; changes preserved:\n" + status.strip())
 
 
+def check_debug_apk(path):
+    required = {
+        f"lib/{abi}/{library}"
+        for abi in ("armeabi-v7a", "arm64-v8a", "x86_64")
+        for library in ("libflutter.so", "libtorrent4j.so")
+    }
+    with ZipFile(path) as apk:
+        missing = required.difference(apk.namelist())
+    if missing:
+        raise ValueError("Debug APK is missing native libraries:\n" + "\n".join(sorted(missing)))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--github-output", action="store_true")
     parser.add_argument("--check-flutter", action="store_true")
     parser.add_argument("--clean", action="store_true")
+    parser.add_argument("--debug-apk", type=Path)
     args = parser.parse_args()
     pins = check_gradle()
     if args.check_flutter:
         check_flutter(pins)
     if args.clean:
         check_clean()
+    if args.debug_apk:
+        check_debug_apk(args.debug_apk)
     if args.github_output:
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
             for field, value in pins.items():
@@ -77,5 +93,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError, BadZipFile, subprocess.CalledProcessError) as error:
         raise SystemExit(str(error))

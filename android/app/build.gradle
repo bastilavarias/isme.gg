@@ -39,10 +39,6 @@ android {
         targetSdk 35
         versionCode flutter.versionCode
         versionName flutter.versionName
-        ndk {
-            abiFilters.clear()
-            abiFilters.addAll(releaseAbis)
-        }
         buildConfigField "String", "RELEASE_REPO", '""'
         buildConfigField "String", "TMDB_CREDENTIAL", '"' + metadataCredential + '"'
     }
@@ -91,4 +87,5 @@ dependencies {
     implementation "org.libtorrent4j:libtorrent4j:2.1.0-39"
     implementation "org.libtorrent4j:libtorrent4j-android-arm64:2.1.0-39"
     implementation "org.libtorrent4j:libtorrent4j-android-arm:2.1.0-39"
+    debugImplementation "org.libtorrent4j:libtorrent4j-android-x86_64:2.1.0-39"
 }

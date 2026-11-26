@@ -50,6 +50,7 @@ jobs:
         run: |
           & .\tools\setup-windows.ps1 -SkipPull -BuildOnly -JdkDir "$env:JAVA_HOME"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/check_toolchain.py --debug-apk build/app/outputs/flutter-apk/app-debug.apk
       - name: Analyze and test
         run: |
           flutter analyze --no-pub --no-fatal-infos
