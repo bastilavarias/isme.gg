@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../design.dart';
+import '../my_list.dart';
 import '../engine.dart';
 import '../platform_rail.dart';
 import '../player.dart';
@@ -10,6 +11,7 @@ import '../category_catalog.dart';
 import '../back_navigation.dart';
 import '../next_episode.dart';
 import 'mobile_details.dart';
+import 'mobile_discovery.dart';
 import 'mobile_library.dart';
 import 'mobile_widgets.dart';
 
@@ -20,7 +22,7 @@ class MobileHome extends StatefulWidget{
   @override State<MobileHome> createState()=>_MobileHomeState();
 }
 class _MobileHomeState extends State<MobileHome>{
-  static const categories=categoryNames;
+  static const navigation=['Home','Search','My List'];
   final verifiedWeekly=<String>{};
   bool get mainHome=>category=='Home'&&!filtered;
   final shelves=<String,List<Movie>>{};
@@ -164,10 +166,8 @@ class _MobileHomeState extends State<MobileHome>{
     final seen=<String>{};
     return items.where((m)=>seen.add(m.id)).take(limit).toList();
   }
-  List<Movie> get popular=>unique(shelves.values.expand((m)=>m),limit:30);
   List<Movie> get searchItems{
-    final items=query.text.trim().isEmpty?popular:results;
-    return items.where((m)=>switch(searchCategory){
+    return results.where((m)=>switch(searchCategory){
       'Movies'=>!m.episodic,'TV Series'=>m.type=='Series','Anime'=>m.type=='Anime'||m.animeFilm,_=>true,
     }).toList();
   }
@@ -177,6 +177,7 @@ class _MobileHomeState extends State<MobileHome>{
     final needle=term.toLowerCase();
     setState((){
       searching=term.isNotEmpty;searchFailed=false;
+      if(term.isEmpty)searchCategory='All';
       results=term.isEmpty?[]:unique([...shelves.values.expand((x)=>x),...library.recent].where((m)=>m.title.toLowerCase().contains(needle)));
     });
     if(term.isEmpty)return;
@@ -198,17 +199,18 @@ class _MobileHomeState extends State<MobileHome>{
     setState(()=>recent=[value,...recent.where((s)=>s!=value)].take(8).toList());
     unawaited(widget.history.prefs.setStringList('isme-mobile-searches',recent));
   }
-  Future<void> open(Movie movie) async{
+  Future<void> open(Movie movie,{BuildContext? routeContext}) async{
+    final target=routeContext??context;
     if(opening)return;
     opening=true;
     FocusManager.instance.primaryFocus?.unfocus();
     if(tab==1)rememberSearch();
     try{
       final resolved=await engine.identifyMovie(movie);
-      if(!mounted||ModalRoute.of(context)?.isCurrent!=true)return;
+      if(!mounted||!target.mounted||ModalRoute.of(target)?.isCurrent!=true)return;
       final episode=EpisodeIdentity.parse(resolved);
       final title=episode?.parent(resolved)??resolved;
-      await pushTitleRoute(context,MobileDetails(movie:title,engine:engine,library:library),
+      await pushTitleRoute(target,MobileDetails(movie:title,engine:engine,library:library),
         resumePlayer:episode==null?null:CinemaPlayer(movie:resolved,engine:engine,history:widget.history));
     }catch(_){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Title details are unavailable.')));}
     finally{opening=false;if(mounted)setState((){});}
@@ -286,48 +288,86 @@ class _MobileHomeState extends State<MobileHome>{
             child:const Text('Retry catalog'))))),
     ]));
   }
-  Widget searchPage()=>Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-    Padding(padding:const EdgeInsets.fromLTRB(16,8,16,8),child:TextField(
-      focusNode:searchFocus,controller:query,onChanged:search,onSubmitted:(_)=>rememberSearch(),textInputAction:TextInputAction.search,
-      decoration:InputDecoration(prefixIcon:const Icon(Icons.search),hintText:'Movies, series, anime…',
-        suffixIcon:IconButton(tooltip:'Clear search',onPressed:(){query.clear();search('');},icon:const Icon(Icons.close))))),
-    chips(const ['All','Movies','TV Series','Anime'],searchCategory,(v)=>setState(()=>searchCategory=v)),
-    if(query.text.trim().isEmpty&&recent.isNotEmpty)Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:Wrap(spacing:8,children:[
-      for(final value in recent.take(4))ActionChip(label:Text(value,maxLines:1,overflow:TextOverflow.ellipsis),onPressed:(){query.text=value;search(value);}),
-    ])),
-    if(searching)const LinearProgressIndicator(minHeight:2),
-    if(query.text.trim().isEmpty)heading('Popular titles'),
-    Expanded(child:searchItems.isEmpty?MobileEmpty(searching?'Searching…':'No titles found',
-      searchFailed?'Search unavailable. Try again.':'Try another title or category.'):MobileGrid(movies:searchItems,engine:engine,onOpen:open,controller:searchScroll)),
-  ]);
+  void browse(DiscoveryTile tile)=>openDiscovery(tile.name,collections:tile.collections);
+  void browsePlatform(PlatformBrand brand){
+    if(brand.key!='all')openDiscovery(brand.name,brand:brand);
+  }
+  Future<void> openDiscovery(String title,{List<String> collections=const [],PlatformBrand? brand}) async{
+    searchFocus.unfocus();
+    await Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>MobileDiscoveryCatalog(
+      title:title,engine:engine,collections:collections,brand:brand,providers:directory,
+      onOpen:(ctx,movie)=>open(movie,routeContext:ctx))));
+  }
+  void clearRecent(){
+    setState(()=>recent=[]);
+    unawaited(widget.history.prefs.remove('isme-mobile-searches'));
+  }
+  Widget discovery()=>ListView(
+    key:const PageStorageKey('mobile-discovery'),
+    padding:const EdgeInsets.only(bottom:24),
+    children:[
+      if(recent.isNotEmpty)...[
+        Padding(padding:const EdgeInsets.fromLTRB(16,0,16,0),child:Row(children:[
+          const Expanded(child:Text('Recent searches',style:TextStyle(fontSize:19,fontWeight:FontWeight.w700))),
+          TextButton(onPressed:clearRecent,child:const Text('Clear')),
+        ])),
+        Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:Wrap(spacing:8,runSpacing:4,children:[
+          for(final value in recent.take(4))ActionChip(avatar:const Icon(Icons.history,size:16),
+            label:Text(value,maxLines:1,overflow:TextOverflow.ellipsis),onPressed:(){query.text=value;search(value);}),
+        ])),
+      ],
+      heading('Browse categories'),
+      Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:DiscoveryGrid(tiles:mobileCategories,onSelected:browse)),
+      const SizedBox(height:16),
+      heading('Browse genres'),
+      Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:DiscoveryGrid(tiles:mobileGenres,onSelected:browse)),
+      const SizedBox(height:24),
+      PlatformRail(providers:[...directory,...artwork],selected:PlatformBrand.all,onSelected:browsePlatform,onUp:(){},onDown:(){},tv:false),
+    ]);
+  Widget searchPage(){
+    final empty=query.text.trim().isEmpty;
+    return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+      Padding(padding:const EdgeInsets.fromLTRB(16,8,16,8),child:TextField(
+        key:const ValueKey('mobile-search-field'),focusNode:searchFocus,controller:query,onChanged:search,
+        onSubmitted:(_){rememberSearch();searchFocus.unfocus();},textInputAction:TextInputAction.search,
+        decoration:InputDecoration(prefixIcon:const Icon(Icons.search),hintText:'Movies, series, anime…',
+          suffixIcon:empty?null:IconButton(tooltip:'Clear search',onPressed:(){query.clear();search('');searchFocus.unfocus();},icon:const Icon(Icons.close))))),
+      if(!empty)chips(const ['All','Movies','TV Series','Anime'],searchCategory,(v)=>setState(()=>searchCategory=v)),
+      if(searching)const LinearProgressIndicator(minHeight:2),
+      Expanded(child:empty?discovery():searchItems.isEmpty?MobileEmpty(searching?'Searching…':'No titles found',
+        searchFailed?'Search unavailable. Try again.':'Try another title or category.'):MobileGrid(movies:searchItems,engine:engine,onOpen:open,controller:searchScroll)),
+    ]);
+  }
   static const navIcons=<String,IconData>{
     'Home':Icons.home_outlined,
-    'Movies':Icons.movie_outlined,
-    'TV Series':Icons.tv_outlined,
-    'Anime':Icons.animation,
-    'Pinoy':Icons.public,
+    'Search':Icons.search_rounded,
+    'My List':Icons.bookmark_border,
   };
   Widget navItem(String label){
-    final active=tab==0&&category==label;
+    final active=navigation.indexOf(label)==tab;
     final color=active?CinemaColors.accent:CinemaColors.muted;
     return Semantics(
       selected:active,button:true,label:label,
       child:InkWell(
-        key:ValueKey('mobile-nav-$label'),onTap:()=>setCategory(label),
+        key:ValueKey('mobile-nav-$label'),onTap:(){
+          if(label=='Home'){setCategory('Home');}
+          else if(label=='Search'){showSearch();}
+          else{searchFocus.unfocus();setState(()=>tab=2);}
+        },
         borderRadius:BorderRadius.circular(12),
         child:ConstrainedBox(constraints:const BoxConstraints(minHeight:54,minWidth:48),
           child:Padding(padding:const EdgeInsets.symmetric(vertical:5,horizontal:2),
             child:Column(mainAxisSize:MainAxisSize.min,mainAxisAlignment:MainAxisAlignment.center,children:[
               AnimatedContainer(
                 duration:MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:160),
-                padding:const EdgeInsets.symmetric(horizontal:12,vertical:3),
+                padding:const EdgeInsets.symmetric(horizontal:22,vertical:4),
                 decoration:BoxDecoration(
                   color:active?const Color(0x22F3A369):Colors.transparent,
                   borderRadius:BorderRadius.circular(16)),
                 child:Icon(navIcons[label],size:22,color:color)),
               const SizedBox(height:2),
               Text(label,maxLines:1,overflow:TextOverflow.ellipsis,textAlign:TextAlign.center,
-                style:TextStyle(fontSize:10,color:color,fontWeight:active?FontWeight.w600:FontWeight.w400)),
+                style:TextStyle(fontSize:12,color:color,fontWeight:active?FontWeight.w600:FontWeight.w400)),
             ])))));
   }
   Widget bottomNav()=>Material(
@@ -336,7 +376,7 @@ class _MobileHomeState extends State<MobileHome>{
     child:SafeArea(top:false,child:DecoratedBox(
       decoration:const BoxDecoration(border:Border(top:BorderSide(color:Color(0x1FFFFFFF)))),
       child:Padding(padding:const EdgeInsets.fromLTRB(4,3,4,3),child:Row(children:[
-        for(final label in categories)Expanded(child:navItem(label)),
+        for(final label in navigation)Expanded(child:navItem(label)),
       ])))));
   Widget sideNav()=>Material(
     key:const ValueKey('mobile-side-nav'),
@@ -344,21 +384,20 @@ class _MobileHomeState extends State<MobileHome>{
     child:Container(width:76,decoration:const BoxDecoration(
       border:Border(right:BorderSide(color:Color(0x1FFFFFFF)))),
       child:ListView(padding:const EdgeInsets.symmetric(horizontal:4,vertical:4),children:[
-        for(final label in categories)navItem(label),
+        for(final label in navigation)navItem(label),
       ])));
   void showSearch(){
-    if(tab==1){searchFocus.requestFocus();return;}
+    if(tab==1)return;
+    searchFocus.unfocus();
     setState(()=>tab=1);
-    WidgetsBinding.instance.addPostFrameCallback((_){
-      if(mounted&&tab==1)searchFocus.requestFocus();
-    });
   }
   bool backToHome(){
+    if(tab==1&&query.text.trim().isNotEmpty){query.clear();search('');searchFocus.unfocus();return true;}
     if(tab!=0||!mainHome){setCategory('Home');return true;}
     return false;
   }
   @override Widget build(BuildContext context){
-    final page=tab==1?searchPage():home();
+    final page=tab==2?MyList(store:widget.history.bookmarks,engine:engine,onOpen:(ctx,movie)=>open(movie,routeContext:ctx)):tab==1?searchPage():home();
     final landscape=MediaQuery.orientationOf(context)==Orientation.landscape;
     final keyboard=MediaQuery.viewInsetsOf(context).bottom>0;
     final content=Column(children:[
@@ -366,9 +405,6 @@ class _MobileHomeState extends State<MobileHome>{
         const Expanded(child:Text.rich(TextSpan(style:TextStyle(fontSize:26,fontWeight:FontWeight.w800,letterSpacing:-1),children:[
           TextSpan(text:'isme'),TextSpan(text:'.',style:TextStyle(color:CinemaColors.accent)),TextSpan(text:'gg'),
         ]))),
-        IconButton(key:const ValueKey('mobile-nav-Search'),tooltip:'Search',
-          onPressed:showSearch,icon:const Icon(Icons.search_rounded),
-          color:tab==1?CinemaColors.accent:CinemaColors.ink),
         IconButton(tooltip:'Menu',onPressed:settings,icon:const Icon(Icons.more_vert)),
       ])),
       Expanded(child:PageStorage(bucket:pageStorage,child:KeyedSubtree(key:ValueKey('$tab:$category:${platform.key}'),child:page))),

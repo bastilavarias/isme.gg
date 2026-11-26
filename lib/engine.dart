@@ -283,14 +283,109 @@ class NativeEngine {
   }
   void dispose(){_disposed=true;_providerMemo.clear();_client.close();providerRevision.dispose();}
 }
+/// Production library persistence is native SQLite. The memory implementation
+/// is explicitly injected by tests; it is never a fallback for database errors.
+abstract class LibraryPersistence {
+  Future<Map<String,dynamic>> open(String bookmarks,String history);
+  Future<void> writeBookmark(String id,Map<String,dynamic>? row);
+  Future<void> writeHistory(String id,Map<String,dynamic>? row);
+}
+class SqliteLibraryPersistence implements LibraryPersistence {
+  static const channel=MethodChannel('gg.isme/library');
+  @override Future<Map<String,dynamic>> open(String bookmarks,String history) async {
+    final raw=await channel.invokeMethod<String>('open',{'bookmarks':bookmarks,'history':history});
+    if(raw==null)throw StateError('Local library unavailable');
+    return Map<String,dynamic>.from(jsonDecode(raw) as Map);
+  }
+  @override Future<void> writeBookmark(String id,Map<String,dynamic>? row)=>channel.invokeMethod<void>(
+    'bookmark',{'id':id,'payload':row==null?null:jsonEncode(row)});
+  @override Future<void> writeHistory(String id,Map<String,dynamic>? row)=>channel.invokeMethod<void>(
+    'history',{'id':id,'payload':row==null?null:jsonEncode(row)});
+}
+
+/// Test-only persistence, injectable without Android plugins.
+class MemoryLibraryPersistence implements LibraryPersistence {
+  final bookmarks=<String,Map<String,dynamic>>{},history=<String,Map<String,dynamic>>{};
+  bool migrated=false;
+  @override Future<Map<String,dynamic>> open(String saved,String watched) async{
+    if(!migrated){
+      for(final row in (jsonDecode(saved) as List).whereType<Map<String,dynamic>>()){
+        bookmarks.putIfAbsent(row['id'] as String,()=>row);
+      }
+      for(final row in (jsonDecode(watched) as Map).values.whereType<Map<String,dynamic>>()){
+        history.putIfAbsent(row['id'] as String,()=>row);
+      }
+      migrated=true;
+    }
+    final savedRows=bookmarks.values.toList()..sort((a,b)=>(b['addedAt'] as int).compareTo(a['addedAt'] as int));
+    final watchedRows=history.values.toList()..sort((a,b)=>(b['updated'] as int).compareTo(a['updated'] as int));
+    return {'bookmarks':savedRows,'history':watchedRows};
+  }
+  @override Future<void> writeBookmark(String id,Map<String,dynamic>? row) async{
+    if(row==null){bookmarks.remove(id);}else{bookmarks[id]=row;}
+  }
+  @override Future<void> writeHistory(String id,Map<String,dynamic>? row) async{
+    if(row==null){history.remove(id);}else{history[id]=row;}
+    final sorted=history.values.toList()..sort((a,b)=>(b['updated'] as int).compareTo(a['updated'] as int));
+    for(final item in sorted.skip(30)){history.remove(item['id']);}
+  }
+}
+
 class History {
   final SharedPreferences prefs;
-  History(this.prefs);
-  Map<String,dynamic> get _data {
-    try { return Map<String,dynamic>.from(jsonDecode(prefs.getString('watch-v1') ?? '{}') as Map); } catch (_) { return {}; }
+  final LibraryPersistence _storage;
+  final Map<String,Map<String,dynamic>> _data;
+  final BookmarkStore bookmarks;
+  Future<void> _queue=Future.value();
+
+  History._(this.prefs,this._storage,this._data,this.bookmarks);
+  /// Existing widget tests can use an explicitly in-memory library.
+  factory History.inMemory(SharedPreferences prefs){
+    final storage=MemoryLibraryPersistence();
+    return History._(prefs,storage,{},BookmarkStore(storage,[]));
   }
+
+  static Future<History> open(SharedPreferences prefs,{LibraryPersistence? persistence}) async {
+    final storage=persistence??SqliteLibraryPersistence();
+    // Keep malformed legacy values untouched for recovery. Only remove a
+    // successfully parsed and committed legacy value after SQLite responds.
+    final oldBookmarks=prefs.getString('bookmarks-v1');
+    final oldHistory=prefs.getString('watch-v1');
+    var bookmarkValid=true,historyValid=true;
+    final saved=<Map<String,dynamic>>[],watched=<String,Map<String,dynamic>>{};
+    try{
+      for(final raw in jsonDecode(oldBookmarks??'[]') as List){
+        final row=Map<String,dynamic>.from(raw as Map);
+        final movie=BookmarkStore.parent(Movie.fromJson(row));
+        if(!BookmarkStore.valid(movie)||movie.title.isEmpty){bookmarkValid=false;continue;}
+        if(!saved.any((r)=>BookmarkStore.same(Movie.fromJson(r),movie))){
+          saved.add({...movie.toJson(),'addedAt':row['addedAt'] is int?row['addedAt']:0});
+        }
+      }
+    }catch(_){bookmarkValid=false;}
+    try{
+      for(final raw in (jsonDecode(oldHistory??'{}') as Map).values){
+        final row=Map<String,dynamic>.from(raw as Map);
+        final movie=Movie.fromJson(row);
+        if(movie.id.isEmpty||movie.title.isEmpty||row['time'] is! int||row['duration'] is! int||row['updated'] is! int||
+          (row['time'] as int)<0||(row['duration'] as int)<0){historyValid=false;continue;}
+        watched[movie.id]=row;
+      }
+    }catch(_){historyValid=false;}
+    final snapshot=await storage.open(jsonEncode(saved),jsonEncode(watched));
+    final data=<String,Map<String,dynamic>>{};
+    for(final raw in snapshot['history'] as List){
+      final row=Map<String,dynamic>.from(raw as Map);
+      data[row['id'] as String]=row;
+    }
+    final store=BookmarkStore(storage,(snapshot['bookmarks'] as List).map((r)=>Map<String,dynamic>.from(r as Map)).toList());
+    if(bookmarkValid&&oldBookmarks!=null)await prefs.remove('bookmarks-v1');
+    if(historyValid&&oldHistory!=null)await prefs.remove('watch-v1');
+    return History._(prefs,storage,data,store);
+  }
+
   List<Movie> movies() {
-    final rows = _data.values.whereType<Map<String,dynamic>>().toList()
+    final rows = _data.values.toList()
       ..sort((a,b)=>(b['updated'] as int).compareTo(a['updated'] as int));
     return rows.map(Movie.fromJson).toList();
   }
@@ -299,13 +394,76 @@ class History {
     final row=_data[m.id],time=row?['time'],duration=row?['duration'];
     return time is num&&duration is num&&duration>0?(time/duration).clamp(0.0,1.0).toDouble():null;
   }
-  Future<void> save(Movie m, Duration position, Duration duration) async {
+  Future<void> save(Movie m, Duration position, Duration duration) {
     final seconds=position.inSeconds;
-    if(seconds<12 || m.id.isEmpty) return;
-    final data=_data;
-    if(duration.inSeconds>0 && seconds/duration.inSeconds>0.97) { data.remove(m.id); }
-    else { data[m.id]={...m.toJson(),'time':seconds,'duration':duration.inSeconds,'updated':DateTime.now().millisecondsSinceEpoch}; }
-    final entries=data.entries.toList()..sort((a,b)=>(b.value['updated'] as int).compareTo(a.value['updated'] as int));
-    await prefs.setString('watch-v1',jsonEncode(Map.fromEntries(entries.take(30))));
+    if(seconds<12 || m.id.isEmpty || duration.isNegative)return Future.value();
+    final job=_queue.then((_)async{
+      final completed=duration.inSeconds>0&&seconds/duration.inSeconds>0.97;
+      final row=completed?null:<String,dynamic>{...m.toJson(),'time':seconds,'duration':duration.inSeconds,'updated':DateTime.now().millisecondsSinceEpoch};
+      await _storage.writeHistory(m.id,row);
+      if(row==null){_data.remove(m.id);}else{_data.remove(m.id);_data[m.id]=row;}
+      final entries=_data.entries.toList().reversed.toList()..sort((a,b)=>(b.value['updated'] as int).compareTo(a.value['updated'] as int));
+      for(final entry in entries.skip(30)){_data.remove(entry.key);}
+    });
+    _queue=job.then<void>((_){},onError:(Object _,StackTrace __){});
+    return job;
+  }
+}
+
+/// Saved titles are independent of watch progress and stay on this device.
+class BookmarkStore extends ChangeNotifier {
+  final LibraryPersistence _storage;
+  final List<Movie> _items=[];
+  int _lastAddedAt=0;
+  Future<void> _queue=Future.value();
+  BookmarkStore(this._storage,List<Map<String,dynamic>> rows){
+    for(final row in rows){
+      final item=parent(Movie.fromJson(row));
+      if(valid(item)&&item.title.isNotEmpty&&!contains(item))_items.add(item);
+      final added=row['addedAt'];
+      if(added is int&&added>_lastAddedAt)_lastAddedAt=added;
+    }
+  }
+
+  static Movie parent(Movie movie){
+    if(!movie.isEpisode)return movie;
+    return Movie(id:movie.id.replaceFirst(RegExp(r':s[0-9]+:e[0-9]+$'),''),
+      title:movie.title.replaceFirst(RegExp(r' · S[0-9]+ E[0-9]+$'),''),
+      poster:movie.poster,type:movie.type,tmdbId:movie.tmdbId,
+      pinoy:movie.pinoy,animeFilm:movie.animeFilm);
+  }
+  static int tmdb(Movie movie)=>movie.tmdbId>0?movie.tmdbId:
+    movie.id.startsWith('tmdb:')?(int.tryParse(movie.id.split(':').last)??0):0;
+  static bool same(Movie a,Movie b){
+    final x=parent(a),y=parent(b);
+    if(x.episodic!=y.episodic)return false;
+    return (x.id.isNotEmpty&&x.id==y.id)||(tmdb(x)>0&&tmdb(x)==tmdb(y));
+  }
+  static bool valid(Movie movie)=>RegExp(r'^(imdb:tt[0-9]{7,10}|tmdb:(movie|tv):[1-9][0-9]{0,8})$').hasMatch(movie.id);
+  List<Movie> get movies=>List.unmodifiable(_items);
+  bool contains(Movie movie)=>_items.any((m)=>same(m,movie));
+  Future<void> toggle(Movie movie)=>_change(movie,null);
+  Future<void> remove(Movie movie)=>_change(movie,false);
+  Future<void> _change(Movie movie,bool? save){
+    final item=parent(movie);
+    final job=_queue.then((_) async{
+      if(!valid(item)||item.title.isEmpty)throw ArgumentError('Invalid saved title');
+      final existing=_items.where((m)=>same(m,item)).firstOrNull;
+      final exists=existing!=null,wanted=save??!exists;
+      if(exists==wanted)return;
+      if(wanted){
+        final now=DateTime.now().millisecondsSinceEpoch;
+        final addedAt=now>_lastAddedAt?now:_lastAddedAt+1;
+        await _storage.writeBookmark(item.id,{...item.toJson(),'addedAt':addedAt});
+        _lastAddedAt=addedAt;
+        _items.insert(0,item);
+      }else{
+        await _storage.writeBookmark(existing!.id,null);
+        _items.removeWhere((m)=>same(m,item));
+      }
+      notifyListeners();
+    });
+    _queue=job.then<void>((_){},onError:(Object _,StackTrace __){});
+    return job;
   }
 }

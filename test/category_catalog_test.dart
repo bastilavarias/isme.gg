@@ -84,7 +84,7 @@ void main(){
     SharedPreferences.setMockInitialValues({});
     final engine=CategoryTestEngine()..tv=true;
     addTearDown(engine.dispose);
-    final history=History(await SharedPreferences.getInstance());
+    final history=History.inMemory(await SharedPreferences.getInstance());
     tester.view.physicalSize=const Size(1280,720);
     tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -123,7 +123,7 @@ void main(){
     SharedPreferences.setMockInitialValues({});
     final engine=CategoryTestEngine()..tv=true;
     addTearDown(engine.dispose);
-    final history=History(await SharedPreferences.getInstance());
+    final history=History.inMemory(await SharedPreferences.getInstance());
     tester.view.physicalSize=const Size(1280,720);
     tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -154,6 +154,9 @@ void main(){
     page('Pinoy');
     await right();
     page('Pinoy');
+    expect(tab('My List').hasFocus,isTrue);
+    await right();
+    page('Pinoy');
     expect(find.byType(PopupMenuItem),findsNothing);
     final menu = find.ancestor(of: find.byTooltip('Menu'), matching: find.byType(IconButton));
     expect(tester.widget<IconButton>(menu).focusNode!.hasFocus, isTrue);
@@ -169,12 +172,43 @@ void main(){
     expect(tester.takeException(),isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
-  for(final tv in [true,false]){
+  testWidgets('Mobile discovery catalogs ignore a late response after returning to Search',(tester)async{
+    SharedPreferences.setMockInitialValues({});
+    final engine=CategoryTestEngine();addTearDown(engine.dispose);
+    final history=History.inMemory(await SharedPreferences.getInstance());
+    tester.view.physicalSize=const Size(390,844);
+    tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:deviceHome(engine,history)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('mobile-nav-Search')));
+    await tester.pumpAndSettle();
+    engine.blockedMovieRecent=Completer<CatalogSnapshot>();
+    await tester.tap(find.byKey(const ValueKey('mobile-discover-Movies')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds:400));
+    expect(engine.recentRequested,isTrue);
+    expect(find.widgetWithText(AppBar,'Movies'),findsOneWidget);
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Browse categories'),findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('mobile-discover-Anime')));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar,'Anime'),findsOneWidget);
+    expect(engine.requested,contains('page_anime_movies'));
+    engine.blockedMovieRecent!.complete(engine.fixture('page_movies_recent'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar,'Anime'),findsOneWidget);
+    expect(find.text('page_movies_recent title 0'),findsNothing);
+    expect(tester.takeException(),isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+  for(final tv in [true]){
     testWidgets('${tv?"TV":"Mobile"}: category nav loads independent catalogs and ignores a late response',(tester)async{
       SharedPreferences.setMockInitialValues({});
       final engine=CategoryTestEngine()..tv=tv;
       addTearDown(engine.dispose);
-      final history=History(await SharedPreferences.getInstance());
+      final history=History.inMemory(await SharedPreferences.getInstance());
       tester.view.physicalSize=tv?const Size(1280,720):const Size(390,844);
       tester.view.devicePixelRatio=1;
       addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);

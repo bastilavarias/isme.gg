@@ -43,7 +43,7 @@ void main(){
   });
   test('shared resume information includes episode label and real percentage',()async{
     SharedPreferences.setMockInitialValues({});
-    final history=History(await SharedPreferences.getInstance());
+    final history=History.inMemory(await SharedPreferences.getInstance());
     const ep=Movie(id:'imdb:tt1234567:s2:e3',title:'Show',type:'Series');
     expect(resumeTitle(ep),'Show · S2 E3');
     expect(history.fraction(ep),isNull);
@@ -58,7 +58,7 @@ void main(){
       tester.view.physicalSize=tv?const Size(1280,720):const Size(390,844);
       tester.view.devicePixelRatio=1;
       addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
-      final history=History(await SharedPreferences.getInstance());
+      final history=History.inMemory(await SharedPreferences.getInstance());
       await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:deviceHome(engine,history)));
       await tester.pumpAndSettle();
       final labels=homeSections(weeklySectionKeys).values.toList();

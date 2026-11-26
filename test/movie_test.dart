@@ -11,7 +11,7 @@ void main() {
   });
   test('history retains progress and removes completed movie', () async {
     SharedPreferences.setMockInitialValues({});
-    final history = History(await SharedPreferences.getInstance());
+    final history = History.inMemory(await SharedPreferences.getInstance());
     const movie = Movie(id:'test',title:'Test movie');
     await history.save(movie,const Duration(seconds:20),const Duration(seconds:100));
     expect(history.position(movie),const Duration(seconds:20));

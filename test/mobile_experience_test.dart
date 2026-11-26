@@ -21,7 +21,7 @@ class MobileTestEngine extends NativeEngine{
 void main(){
   test('TV always keeps its existing shell; phone uses a separate shell',()async{
     SharedPreferences.setMockInitialValues({});
-    final history=History(await SharedPreferences.getInstance());
+    final history=History.inMemory(await SharedPreferences.getInstance());
     final engine=MobileTestEngine();addTearDown(engine.dispose);
     expect(deviceHome(engine,history),isA<MobileHome>());
     engine.tv=true;
@@ -29,7 +29,8 @@ void main(){
   });
   test('watch progress remains backward compatible',()async{
     SharedPreferences.setMockInitialValues({});
-    final history=History(await SharedPreferences.getInstance()),library=MobileLibrary(History(await SharedPreferences.getInstance()));
+    final history=History.inMemory(await SharedPreferences.getInstance());
+    final library=MobileLibrary(history);
     const film=MobileTestEngine.film;
     await history.save(film,const Duration(seconds:30),const Duration(seconds:100));
     expect(library.fraction(film),.3);
@@ -41,29 +42,45 @@ void main(){
     tester.view.physicalSize=const Size(390,844);
     tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
-    final history=History(await SharedPreferences.getInstance());
+    final history=History.inMemory(await SharedPreferences.getInstance());
     await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:deviceHome(engine,history)));
     await tester.pumpAndSettle();
-    for(final label in ['Home','Search','Movies','TV Series','Anime','Pinoy']){
+    for(final label in ['Home','Search','My List']){
       expect(find.byKey(ValueKey('mobile-nav-$label')),findsOneWidget);
     }
+    for(final label in ['Movies','TV Series','Anime','Pinoy']){
+      expect(find.byKey(ValueKey('mobile-nav-$label')),findsNothing);
+    }
     expect(find.text('Browse'),findsNothing);
-    expect(find.text('My List'),findsNothing);
+    expect(find.text('My List'),findsOneWidget);
     expect(find.byKey(const ValueKey('mobile-bottom-nav')),findsOneWidget);
     expect(find.byKey(const ValueKey('mobile-side-nav')),findsNothing);
     await tester.scrollUntilVisible(find.text('Explore platforms'),240,
       scrollable:find.descendant(of:find.byKey(const PageStorageKey('mobile-home')),matching:find.byType(Scrollable)).first);
     expect(find.text('Explore platforms'),findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('mobile-nav-Search')));await tester.pumpAndSettle();
-    expect(find.byType(TextField),findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('mobile-nav-Movies')));await tester.pumpAndSettle();
-    expect(find.text('Explore platforms'),findsNothing);
+    final field=find.byKey(const ValueKey('mobile-search-field'));
+    expect(field,findsOneWidget);
+    expect(tester.widget<TextField>(field).focusNode!.hasFocus,isFalse);
+    expect(find.text('Browse categories'),findsOneWidget);
+    await tester.enterText(field,'Example');await tester.pumpAndSettle();
+    expect(find.text('Browse categories'),findsNothing);
+    expect(find.byTooltip('Clear search'),findsOneWidget);
+    await tester.tap(find.byTooltip('Clear search'));await tester.pumpAndSettle();
+    expect(find.text('Browse categories'),findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('mobile-discover-Movies')));await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar,'Movies'),findsOneWidget);
+    await tester.tap(find.byType(BackButton));await tester.pumpAndSettle();
+    expect(find.text('Browse categories'),findsOneWidget);
     tester.view.physicalSize=const Size(844,390);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('mobile-bottom-nav')),findsNothing);
     expect(find.byKey(const ValueKey('mobile-side-nav')),findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('mobile-nav-Pinoy')));await tester.pumpAndSettle();
-    expect(find.text('Explore platforms'),findsNothing);
+    expect(find.byKey(const ValueKey('mobile-nav-Search')),findsOneWidget);
+    expect(find.byKey(const ValueKey('mobile-nav-Pinoy')),findsNothing);
+    await history.bookmarks.toggle(MobileTestEngine.film);
+    await tester.tap(find.byKey(const ValueKey('mobile-nav-My List')));await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('saved-imdb:tt1234567')),findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('mobile-nav-Home')));await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Explore platforms'),200,
       scrollable:find.descendant(of:find.byKey(const PageStorageKey('mobile-home')),matching:find.byType(Scrollable)).first);
@@ -74,13 +91,15 @@ void main(){
   testWidgets('mobile episodes list and season sheet work without TV focus widgets',(tester)async{
     SharedPreferences.setMockInitialValues({});
     final engine=MobileTestEngine();addTearDown(engine.dispose);
-    final library=MobileLibrary(History(await SharedPreferences.getInstance()));
+    final library=MobileLibrary(History.inMemory(await SharedPreferences.getInstance()));
     tester.view.physicalSize=const Size(390,844);tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:MobileDetails(movie:MobileTestEngine.show,engine:engine,library:library)));
     await tester.pumpAndSettle();
     expect(find.text('Pilot 1'),findsOneWidget);
-    expect(find.text('My List'),findsNothing);
+    await tester.tap(find.byKey(const ValueKey('bookmark-toggle')));await tester.pumpAndSettle();
+    expect(find.text('Saved'),findsOneWidget);
+    expect(library.history.bookmarks.contains(MobileTestEngine.show),isTrue);
     expect(find.text('Copy title'),findsNothing);
     await tester.tap(find.text('Season 1'));await tester.pumpAndSettle();
     await tester.tap(find.text('Season 2'));await tester.pumpAndSettle();

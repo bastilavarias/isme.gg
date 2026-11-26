@@ -22,15 +22,18 @@ import java.util.Locale;
  */
 final class MediaCatalog {
     static final String CINEMETA = "https://v3-cinemeta.strem.io";
-    static final String TORRENTIO = "https://torrentio.strem.fun";
     static final long MAX_BYTES = 3L * 1024 * 1024 * 1024;
 
     static JSONObject getJson(String address, int maxBytes) throws Exception {
+        return getJson(address, maxBytes, 12000, 16000);
+    }
+
+    private static JSONObject getJson(String address, int maxBytes, int connectMs, int readMs) throws Exception {
         URL url = new URL(address);
         if (!"https".equalsIgnoreCase(url.getProtocol())) throw new IOException("HTTPS required");
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setConnectTimeout(12000);
-        connection.setReadTimeout(16000);
+        connection.setConnectTimeout(connectMs);
+        connection.setReadTimeout(readMs);
         connection.setRequestProperty("Accept", "application/json");
         connection.setRequestProperty("User-Agent", "isme-tv/1.0");
         try {
@@ -140,7 +143,14 @@ final class MediaCatalog {
     static List<Source> resolve(String imdbId, String title) throws Exception {
         boolean episodic=imdbId.matches("tt[0-9]{7,10}:[0-9]{1,5}:[0-9]{1,5}");
         if (!episodic&&!imdbId.matches("tt[0-9]{7,10}")) throw new IOException("Invalid media ID");
-        JSONObject result = getJson(TORRENTIO + "/stream/"+(episodic?"series":"movie")+"/" + imdbId + ".json", 2 * 1024 * 1024);
+        String path = "/stream/" + (episodic ? "series" : "movie") + "/" + imdbId + ".json";
+        return SourceProviders.firstAvailable(provider -> {
+            JSONObject result = getJson(provider.base + path, 2 * 1024 * 1024, 4000, 6000);
+            return parseSources(result, title, episodic);
+        });
+    }
+
+    static List<Source> parseSources(JSONObject result, String title, boolean episodic) throws Exception {
         JSONArray streams = result.optJSONArray("streams");
         List<Source> found = new ArrayList<>();
         if (streams == null) return found;
@@ -149,23 +159,35 @@ final class MediaCatalog {
             if (stream == null) continue;
             String hash = stream.optString("infoHash", "").toLowerCase(Locale.ROOT);
             if (!hash.matches("[a-f0-9]{40}")) continue;
-            String release = stream.optString("title", stream.optString("name", ""));
-            String shortName = release.split("\\n")[0];
+            // Only accept direct torrent results, not debrid or HTTP playback links.
+            if (!stream.optString("url", "").isEmpty() || !stream.optString("externalUrl", "").isEmpty()) continue;
+            JSONObject hints = stream.optJSONObject("behaviorHints");
+            String providerTitle = stream.optString("title", "");
+            String description = stream.optString("description", "");
+            String filename = hints == null ? "" : hints.optString("filename", "");
+            String display = !providerTitle.isEmpty() ? providerTitle : !filename.isEmpty() ? filename : description;
+            if (display.isEmpty()) display = stream.optString("name", "");
+            String shortName = display.split("\\n", 2)[0];
+            String release = display + "\n" + description + "\n" + stream.optString("name", "");
             // For episodic content the resolver key includes exact season and
             // episode; translated and alternate titles need not match the display title.
             if (!episodic&&!containsTitle(shortName, title)) continue;
             int fileIndex=episodic?stream.optInt("fileIdx",-1):-1;
             if(fileIndex < -1)continue;
-            long bytes = parseSize(release);
+            long bytes = hints == null ? -1 : hints.optLong("videoSize", -1);
+            if (bytes <= 0) bytes = parseSize(release);
             // A pack can report aggregate size. The engine separately checks the
             // selected video's size and refuses ambiguous multi-file episodes.
             if (bytes > MAX_BYTES&&(!episodic||fileIndex<0)) continue;
             String quality = release.contains("720p") ? "720p"
                 : release.contains("1080p") ? "1080p" : release.contains("480p") ? "480p" : "Unknown";
-            if (release.toLowerCase(Locale.ROOT).matches(".*(?:\\bcam\\b|telesync|hdcam).*")) continue;
+            if (release.toLowerCase(Locale.ROOT).matches("(?s).*(?:\\bcam\\b|telesync|hdcam).*")) continue;
             int seeders = 0;
             java.util.regex.Matcher seedMatch = java.util.regex.Pattern.compile("👤\\s*(\\d+)").matcher(release);
-            if (seedMatch.find()) seeders = Integer.parseInt(seedMatch.group(1));
+            if (seedMatch.find()) {
+                try { seeders = Integer.parseInt(seedMatch.group(1)); }
+                catch (NumberFormatException ignored) { seeders = 0; }
+            }
             String magnet = "magnet:?xt=urn:btih:" + hash;
             JSONArray trackers = stream.optJSONArray("sources");
             if (trackers != null) for (int j = 0; j < trackers.length() && j < 20; j++) {
@@ -197,7 +219,7 @@ final class MediaCatalog {
             "480p".equals(src.quality) ? 40 : 0;
         int codec = src.name.matches("(?i).*(?:x265|hevc|av1|hdr).*") ? -50 : 0;
         if (src.name.toLowerCase(Locale.ROOT).contains("mp4")) codec += 12;
-        return q + codec + Math.min(90, src.seeders * 2);
+        return q + codec + Math.min(45, src.seeders) * 2;
     }
 
     private static boolean containsTitle(String release, String title) {

@@ -7,23 +7,23 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import org.json.JSONObject;
 
-/** Small, disposable metadata cache. Never stores playback bytes or credentials. */
+/** Local SQLite helper. Cache eviction only touches entries, never user library tables. */
 final class CatalogCache extends SQLiteOpenHelper {
     static final long HOUR = 3600000L;
     static final long DAY = 24 * HOUR;
     private static final int MAX_CATALOG_BYTES = 256 * 1024;
     private static final int MAX_PROVIDER_BYTES = 4096;
 
-    CatalogCache(Context context) { super(context, "isme-metadata-v1.db", null, 1); }
+    CatalogCache(Context context) { super(context, "isme-metadata-v1.db", null, 2); }
 
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE entries (kind TEXT NOT NULL, cache_key TEXT NOT NULL, payload TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY(kind,cache_key))");
         db.execSQL("CREATE INDEX entries_age ON entries(kind,updated)");
+        UserLibrary.createTables(db);
     }
 
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        db.execSQL("DROP TABLE IF EXISTS entries");
-        onCreate(db);
+        if (oldVersion < 2) UserLibrary.createTables(db);
     }
 
     static final class Entry {

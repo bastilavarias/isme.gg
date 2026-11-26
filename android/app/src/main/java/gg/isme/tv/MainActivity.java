@@ -36,6 +36,30 @@ public final class MainActivity extends FlutterActivity {
     }
     @Override public void configureFlutterEngine(FlutterEngine engine) {
         super.configureFlutterEngine(engine);
+        io.flutter.plugin.common.BinaryMessenger messenger = engine.getDartExecutor().getBinaryMessenger();
+        new MethodChannel(messenger, "gg.isme/library",
+                io.flutter.plugin.common.StandardMethodCodec.INSTANCE, messenger.makeBackgroundTaskQueue())
+            .setMethodCallHandler((call, result) -> {
+                try (CatalogCache database = new CatalogCache(getApplicationContext())) {
+                    UserLibrary library = new UserLibrary(database);
+                    switch (call.method) {
+                        case "open":
+                            result.success(library.open(call.argument("bookmarks"), call.argument("history")));
+                            break;
+                        case "bookmark":
+                            library.saveBookmark(call.argument("id"), call.argument("payload"));
+                            result.success(null);
+                            break;
+                        case "history":
+                            library.saveHistory(call.argument("id"), call.argument("payload"));
+                            result.success(null);
+                            break;
+                        default: result.notImplemented();
+                    }
+                } catch (Exception e) {
+                    result.error("LIBRARY", "Could not access local library database", null);
+                }
+            });
         new MethodChannel(engine.getDartExecutor().getBinaryMessenger(), "gg.isme/native")
             .setMethodCallHandler((call, result) -> {
                 if ("connect".equals(call.method)) {

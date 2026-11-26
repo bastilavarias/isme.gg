@@ -34,7 +34,7 @@ void main(){
     final engine=SeriesEngine();addTearDown(engine.dispose);
     await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:SeriesPage(
       show:const Movie(id:'tmdb:tv:123',title:'Example',type:'Series',tmdbId:123),
-      engine:engine,history:History(await SharedPreferences.getInstance()))));
+      engine:engine,history:History.inMemory(await SharedPreferences.getInstance()))));
     await tester.pumpAndSettle();
     double? width(int n)=>tester.widget<AnimatedContainer>(find.byKey(ValueKey('episode-size-$n'))).constraints?.maxWidth;
     expect(width(1),100);
@@ -72,7 +72,7 @@ void main(){
   });
   testWidgets('season tabs load the corresponding episodes',(tester)async{
     SharedPreferences.setMockInitialValues({});
-    final history=History(await SharedPreferences.getInstance());
+    final history=History.inMemory(await SharedPreferences.getInstance());
     final engine=SeriesEngine();
     addTearDown(engine.dispose);
     await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:SeriesPage(

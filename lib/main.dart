@@ -16,6 +16,8 @@ import 'home_sections.dart';
 import 'category_catalog.dart';
 import 'back_navigation.dart';
 import 'next_episode.dart';
+import 'bookmark_button.dart';
+import 'my_list.dart';
 
 void main(){ WidgetsFlutterBinding.ensureInitialized(); PaintingBinding.instance.imageCache.maximumSizeBytes=48*1024*1024; PaintingBinding.instance.imageCache.maximumSize=120; runApp(const IsmeApp()); }
 class IsmeApp extends StatefulWidget {
@@ -27,7 +29,7 @@ class _IsmeAppState extends State<IsmeApp> {
   @override void initState(){super.initState();boot();}
   Future<void> boot() async {
     final e=NativeEngine();
-    try {await e.connect(); await e.restoreMetadataCredential(); final h=History(await SharedPreferences.getInstance());final country=h.prefs.getString('isme-provider-country')??'PH';if(RegExp(r'^[A-Z]{2}$').hasMatch(country))e.providerCountry=country;if(!mounted){e.dispose();return;}setState((){engine=e;history=h;error=null;});}
+    try {await e.connect(); await e.restoreMetadataCredential(); final h=await History.open(await SharedPreferences.getInstance());final country=h.prefs.getString('isme-provider-country')??'PH';if(RegExp(r'^[A-Z]{2}$').hasMatch(country))e.providerCountry=country;if(!mounted){e.dispose();return;}setState((){engine=e;history=h;error=null;});}
     catch(err){e.dispose();if(mounted)setState(()=>error=err.toString());}
   }
   @override void dispose(){engine?.dispose();super.dispose();}
@@ -150,6 +152,8 @@ class _CinemaHomeState extends State<CinemaHome> {
   final homeNav=FocusNode(debugLabel:'Home'), searchNav=FocusNode(debugLabel:'Search'),
     menuNav=FocusNode(debugLabel:'Menu'), heroFocus=FocusNode(debugLabel:'Hero watch');
   final movieNav=FocusNode(debugLabel:'Movies'),seriesNav=FocusNode(debugLabel:'TV Series'),animeNav=FocusNode(debugLabel:'Anime'),pinoyNav=FocusNode(debugLabel:'Pinoy');
+  final myListNav=FocusNode(debugLabel:'My List');
+  bool openingList=false;
   FocusNode get sectionNav=>switch(section){'Movies'=>movieNav,'Series'=>seriesNav,'Anime'=>animeNav,'Pinoy'=>pinoyNav,_=>homeNav};
   final rowKeys=<String,GlobalKey<CinemaShelfState>>{};
   final menuAnchor=GlobalKey();
@@ -197,6 +201,7 @@ class _CinemaHomeState extends State<CinemaHome> {
       if(animeNav.hasFocus){showSection('Anime');return KeyEventResult.handled;}
       if(pinoyNav.hasFocus){showSection('Pinoy');return KeyEventResult.handled;}
       if(searchNav.hasFocus){showSearch();return KeyEventResult.handled;}
+      if(myListNav.hasFocus){showMyList();return KeyEventResult.handled;}
       if(menuNav.hasFocus){openNavMenu();return KeyEventResult.handled;}
     }
     if(key==LogicalKeyboardKey.arrowDown){
@@ -205,7 +210,7 @@ class _CinemaHomeState extends State<CinemaHome> {
       return KeyEventResult.handled;
     }
     if(key==LogicalKeyboardKey.arrowLeft||key==LogicalKeyboardKey.arrowRight){
-      final nodes=[homeNav,searchNav,movieNav,seriesNav,animeNav,pinoyNav,menuNav];
+      final nodes=[homeNav,searchNav,movieNav,seriesNav,animeNav,pinoyNav,myListNav,menuNav];
       final current=nodes.indexWhere((n)=>n.hasFocus);
       if(current>=0){nodes[(current+(key==LogicalKeyboardKey.arrowRight?1:-1)).clamp(0,nodes.length-1).toInt()].requestFocus();return KeyEventResult.handled;}
     }
@@ -338,15 +343,27 @@ class _CinemaHomeState extends State<CinemaHome> {
       if(mounted&&searching)searchPageKey.currentState?.focusKeyboard();
     });
   }
-  Future<void> open(Movie m) async {
-    if(openingTitle||ModalRoute.of(context)?.isCurrent!=true)return;
+  Future<void> showMyList() async{
+    if(openingList||ModalRoute.of(context)?.isCurrent!=true)return;
+    openingList=true;
+    try{
+      await Navigator.of(context).push<void>(MaterialPageRoute(builder:(_)=>MyList(
+        store:widget.history.bookmarks,engine:engine,tv:true,onOpen:(ctx,m)=>open(m,routeContext:ctx))));
+    }finally{
+      openingList=false;
+      if(mounted)myListNav.requestFocus();
+    }
+  }
+  Future<void> open(Movie m,{BuildContext? routeContext}) async {
+    final target=routeContext??context;
+    if(openingTitle||ModalRoute.of(target)?.isCurrent!=true)return;
     openingTitle=true;
     try{
       if(m.id.startsWith('tmdb:movie:')&&!m.isEpisode)m=await engine.identifyMovie(m);
-      if(!mounted||ModalRoute.of(context)?.isCurrent!=true)return;
+      if(!mounted||!target.mounted||ModalRoute.of(target)?.isCurrent!=true)return;
       final episode=EpisodeIdentity.parse(m);
       final title=episode?.parent(m)??m;
-      await pushTitleRoute(context,title.episodic?
+      await pushTitleRoute(target,title.episodic?
         SeriesPage(show:title,engine:engine,history:widget.history,initialEpisode:episode):
         Details(movie:title,engine:engine,history:widget.history),
         resumePlayer:episode==null?null:CinemaPlayer(movie:m,engine:engine,history:widget.history));
@@ -374,7 +391,7 @@ class _CinemaHomeState extends State<CinemaHome> {
     await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:const Movie(id:'manual',title:'Media source'),engine:engine,history:widget.history,magnet:value)));
     if(mounted)setState((){});
   }
-  @override void dispose(){debounce?.cancel();search.dispose();homeScroll.dispose();selected.dispose();homeNav.dispose();movieNav.dispose();seriesNav.dispose();animeNav.dispose();pinoyNav.dispose();searchNav.dispose();menuNav.dispose();heroFocus.dispose();platformStatusFocus.dispose();super.dispose();}
+  @override void dispose(){debounce?.cancel();search.dispose();homeScroll.dispose();selected.dispose();homeNav.dispose();movieNav.dispose();seriesNav.dispose();animeNav.dispose();pinoyNav.dispose();myListNav.dispose();searchNav.dispose();menuNav.dispose();heroFocus.dispose();platformStatusFocus.dispose();super.dispose();}
   @override Widget build(BuildContext context){
     final tv=engine.tv;
     final nav=Focus(canRequestFocus:false,onKeyEvent:navKeys,child:Container(
@@ -392,6 +409,7 @@ class _CinemaHomeState extends State<CinemaHome> {
             navButton('Anime',animeNav,!searching&&section=='Anime',()=>showSection('Anime'),category:'Anime'),
             navDivider(),
             navButton('Pinoy',pinoyNav,!searching&&section=='Pinoy',()=>showSection('Pinoy'),category:'Pinoy'),
+            navButton('My List',myListNav,false,showMyList),
           ])))),
         SizedBox(width:tv?100:40,child:Align(alignment:Alignment.centerRight,child:IconButton(key:menuAnchor,focusNode:menuNav,tooltip:'Menu',onPressed:openNavMenu,icon:const Icon(Icons.more_vert))))
       ])));
@@ -528,9 +546,12 @@ class Details extends StatelessWidget {
       Expanded(child:Align(alignment:Alignment.bottomLeft,child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:650),child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         Text(movie.title,style:TextStyle(fontWeight:FontWeight.w800,fontSize:engine.tv?44:34)),const SizedBox(height:8),Text(movie.year),
         const SizedBox(height:12),Text(movie.description,style:const TextStyle(fontSize:16)),const SizedBox(height:22),
-        FilledButton.icon(autofocus:true,onPressed:(){
-          if(ModalRoute.of(context)?.isCurrent==true)Navigator.push(context,MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:movie,engine:engine,history:history)));
-        },icon:const Icon(Icons.play_arrow),label:Text(history.position(movie)>Duration.zero?'Resume':'Play'))
+        Wrap(spacing:12,runSpacing:8,children:[
+          FilledButton.icon(autofocus:true,onPressed:(){
+            if(ModalRoute.of(context)?.isCurrent==true)Navigator.push(context,MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:movie,engine:engine,history:history)));
+          },icon:const Icon(Icons.play_arrow),label:Text(history.position(movie)>Duration.zero?'Resume':'Play')),
+          BookmarkButton(movie:movie,store:history.bookmarks),
+        ])
       ])))))
     ]))
   ]))));

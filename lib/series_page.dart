@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'design.dart';
+import 'bookmark_button.dart';
 import 'engine.dart';
 import 'player.dart';
 import 'next_episode.dart';
@@ -236,7 +237,11 @@ class _SeriesPageState extends State<SeriesPage> {
       const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Colors.transparent,CinemaColors.canvas],stops:[.18,.91]))),
       Padding(padding:EdgeInsets.symmetric(horizontal:tv?40:18,vertical:12),
         child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-          Align(alignment:Alignment.topLeft,child:IconButton(focusNode:_back,onPressed:()=>Navigator.maybePop(context),icon:const Icon(Icons.arrow_back))),
+          Row(children:[
+            IconButton(focusNode:_back,onPressed:()=>Navigator.maybePop(context),icon:const Icon(Icons.arrow_back)),
+            const SizedBox(width:12),
+            BookmarkButton(movie:show,store:widget.history.bookmarks),
+          ]),
           Expanded(child:Align(alignment:Alignment.bottomLeft,child:SingleChildScrollView(child:ConstrainedBox(
             constraints:BoxConstraints(maxWidth:tv?580:double.infinity),
             child:Column(crossAxisAlignment:CrossAxisAlignment.start,mainAxisSize:MainAxisSize.min,children:[

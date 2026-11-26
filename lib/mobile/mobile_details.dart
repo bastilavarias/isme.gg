@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../design.dart';
+import '../bookmark_button.dart';
 import '../engine.dart';
 import '../next_episode.dart';
 import '../series_page.dart' show distinctEpisodeTitle, episodeDateLabel;
@@ -84,9 +85,13 @@ class _MobileDetailsState extends State<MobileDetails>{
         Text(movie.title,style:const TextStyle(fontSize:29,height:1.12,fontWeight:FontWeight.w800)),
         const SizedBox(height:8),Text(movie.metadata,style:const TextStyle(fontSize:12,color:CinemaColors.muted)),
         const SizedBox(height:18),
-        FilledButton.icon(onPressed:playable==null||opening?null:()=>play(playable),icon:const Icon(Icons.play_arrow),
-          label:Text(playLabel),
-          style:FilledButton.styleFrom(minimumSize:const Size(0,48))),
+        Row(children:[
+          Expanded(child:FilledButton.icon(onPressed:playable==null||opening?null:()=>play(playable),icon:const Icon(Icons.play_arrow),
+            label:Text(playLabel,maxLines:1,overflow:TextOverflow.ellipsis),
+            style:FilledButton.styleFrom(minimumSize:const Size(0,48)))),
+          const SizedBox(width:8),
+          BookmarkButton(movie:movie,store:widget.library.history.bookmarks),
+        ]),
         const SizedBox(height:12),
         if(movie.description.isNotEmpty)Text(movie.description,style:const TextStyle(fontSize:14,height:1.5)),
         const SizedBox(height:8),
