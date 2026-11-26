@@ -44,4 +44,4 @@ Start with [DEVELOPMENT.md](DEVELOPMENT.md) for the pinned Android and Flutter t
 
 The browsing captures show isme.gg's Android and Android TV catalogs. The [website](https://bastilavarias.github.io/isme.gg/) uses posters from [TMDB](https://www.themoviedb.org/) and streaming platform data and logos from JustWatch via TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB. The TMDB logo is by Travis Bell and used unmodified under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). [Logo source](https://commons.wikimedia.org/wiki/File:Tmdb.new.logo.svg).
 
-The player screenshot features **Big Buck Bunny** © 2008 Blender Foundation / www.bigbuckbunny.org. [CC BY 3.0](https://peach.blender.org/about/).
+The player screenshot features **Tears of Steel** © Blender Foundation / mango.blender.org. [Film source](https://commons.wikimedia.org/wiki/File:Tears_of_Steel_1080p.webm). [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
