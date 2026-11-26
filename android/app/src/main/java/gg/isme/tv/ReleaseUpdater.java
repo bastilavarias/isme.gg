@@ -48,19 +48,23 @@ final class ReleaseUpdater {
         if(!closed) activity.runOnUiThread(()->{if(!closed&&!activity.isDestroyed()&&!activity.isFinishing())callback.run();});
     }
     boolean configured(){return !BuildConfig.DEBUG&&BuildConfig.RELEASE_REPO.matches("[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+");}
-    private static boolean allowed(URL url, boolean api) {
+    private static boolean allowed(URL url) {
         if(!"https".equals(url.getProtocol())||url.getUserInfo()!=null||(url.getPort()!=-1&&url.getPort()!=443))return false;
         String host=url.getHost().toLowerCase(Locale.ROOT);
-        return api?"api.github.com".equals(host):("github.com".equals(host)||"release-assets.githubusercontent.com".equals(host)||"objects.githubusercontent.com".equals(host));
+        return "github.com".equals(host)||"release-assets.githubusercontent.com".equals(host)||"objects.githubusercontent.com".equals(host);
     }
-    private static HttpURLConnection open(URL initial,boolean api) throws Exception {
+    private static final class HttpFailure extends IOException {
+        final int status;
+        HttpFailure(int status){super("GitHub returned HTTP "+status);this.status=status;}
+    }
+    private static HttpURLConnection open(URL initial) throws Exception {
         URL url=initial;
         for(int i=0;i<6;i++){
-            if(!allowed(url,api))throw new IOException("Untrusted update URL");
+            if(!allowed(url))throw new IOException("Untrusted update URL");
             HttpURLConnection c=(HttpURLConnection)url.openConnection();
             c.setInstanceFollowRedirects(false);c.setConnectTimeout(12000);c.setReadTimeout(30000);
             c.setRequestProperty("User-Agent","ismegg-updater");
-            if(api)c.setRequestProperty("Accept","application/vnd.github+json");
+            c.setUseCaches(false);
             int status;
             try{status=c.getResponseCode();}catch(Exception e){c.disconnect();throw e;}
             if(status>=300&&status<400){
@@ -68,45 +72,47 @@ final class ReleaseUpdater {
                 if(location==null)throw new IOException("Invalid release redirect");
                 url=new URL(url,location);continue;
             }
-            if(status!=200){c.disconnect();throw new IOException("GitHub returned HTTP "+status);}
+            if(status!=200){c.disconnect();throw new HttpFailure(status);}
             return c;
         }
         throw new IOException("Too many update redirects");
     }
-    private static JSONObject json(URL url,boolean api,int limit) throws Exception{
-        HttpURLConnection c=open(url,api);
-        try{return new JSONObject(new String(readLimited(c.getInputStream(),limit),StandardCharsets.UTF_8));}
-        finally{c.disconnect();}
-    }
-    private static JSONObject asset(JSONArray assets,String name) throws IOException{
-        if(assets!=null)for(int i=0;i<assets.length();i++){
-            JSONObject a=assets.optJSONObject(i);
-            if(a!=null&&name.equals(a.optString("name")))return a;
+    private static JSONObject json(URL url,int limit) throws Exception{
+        for(int attempt=0;;attempt++){
+            HttpURLConnection c=null;
+            try{
+                c=open(url);
+                return new JSONObject(new String(readLimited(c.getInputStream(),limit),StandardCharsets.UTF_8));
+            }catch(IOException e){
+                boolean retry=e instanceof java.net.SocketTimeoutException||
+                    e instanceof java.net.ConnectException||e instanceof java.net.UnknownHostException||
+                    (e instanceof HttpFailure&&(((HttpFailure)e).status==429||
+                    ((HttpFailure)e).status>=500));
+                if(!retry||attempt>=1)throw e;
+                android.util.Log.w("IsmeUpdater","Transient manifest fetch failure: "+diagnostic(e)+"; retrying");
+            }finally{if(c!=null)c.disconnect();}
+            Thread.sleep(1000L);
         }
-        throw new IOException("Release asset is missing: "+name);
     }
-    private static URL assetUrl(JSONObject a,String repo,String tag,String name) throws Exception{
-        URL url=new URL(a.getString("browser_download_url"));
-        String expected="/"+repo+"/releases/download/"+tag+"/"+name;
-        if(!allowed(url,false)||!"github.com".equalsIgnoreCase(url.getHost())||!expected.equals(url.getPath())||url.getQuery()!=null||url.getRef()!=null)
-            throw new IOException("Unexpected release asset URL");
-        return url;
+    private static String diagnostic(Exception e){
+        String message=e.getMessage();
+        // Never print signed redirect URLs or their query credentials.
+        if(message!=null)message=message.replaceAll("https?://\\S+","[URL]");
+        if(message!=null&&message.length()>240)message=message.substring(0,240);
+        return e.getClass().getSimpleName()+(message==null?"":": "+message);
     }
     void check(Listener listener){
         if(!configured()){ui(()->listener.complete(null,"Updates are disabled in this build."));return;}
         worker.execute(()->{
             try{
                 String repo=BuildConfig.RELEASE_REPO;
-                JSONObject data=json(new URL("https://api.github.com/repos/"+repo+"/releases/latest"),true,1024*1024);
-                if(data.optBoolean("draft")||data.optBoolean("prerelease")){ui(()->listener.complete(null,null));return;}
-                String tag=data.optString("tag_name");
-                if(!tag.matches("v[0-9]+\\.[0-9]+\\.[0-9]+"))throw new IOException("Invalid stable release tag");
-                JSONArray assets=data.optJSONArray("assets");
-                JSONObject manifestAsset=asset(assets,"update.json");
-                JSONObject manifest=json(assetUrl(manifestAsset,repo,tag,"update.json"),false,64*1024);
+                // GitHub's latest-download endpoint resolves the stable public release
+                // without the anonymous REST API's per-IP quota.
+                JSONObject manifest=json(new URL("https://github.com/"+repo+"/releases/latest/download/update.json"),64*1024);
                 long code=manifest.getLong("versionCode");
                 String version=manifest.getString("version");
-                if(!tag.equals("v"+version)||code<=0||!APK.equals(manifest.getString("asset"))||!activity.getPackageName().equals(manifest.getString("packageId")))
+                String tag="v"+version;
+                if(!tag.matches("v[0-9]+\\.[0-9]+\\.[0-9]+")||code<=0||!APK.equals(manifest.getString("asset"))||!activity.getPackageName().equals(manifest.getString("packageId")))
                     throw new IOException("Release metadata mismatch");
                 if(code<=BuildConfig.VERSION_CODE){ui(()->listener.complete(null,null));return;}
                 if(manifest.getInt("minimumAndroidSdk")>Build.VERSION.SDK_INT)throw new IOException("Android version not supported");
@@ -115,20 +121,22 @@ final class ReleaseUpdater {
                 for(String supported:Build.SUPPORTED_ABIS)for(int i=0;i<abis.length();i++)
                     if(supported.equals(abis.optString(i)))compatible=true;
                 if(!compatible){ui(()->listener.complete(null,"This update does not support your device architecture."));return;}
-                JSONObject apk=asset(assets,APK);
-                long size=apk.getLong("size");
+                long size=manifest.getLong("bytes");
                 String hash=manifest.getString("sha256").toLowerCase(Locale.ROOT);
-                String digest=apk.optString("digest");
-                if(size<=0||size>MAX_APK_SIZE||size!=manifest.getLong("bytes")||!hash.matches("[a-f0-9]{64}")||
-                    (!digest.isEmpty()&&!"null".equals(digest)&&!digest.equalsIgnoreCase("sha256:"+hash)))
+                if(size<=0||size>MAX_APK_SIZE||!hash.matches("[a-f0-9]{64}"))
                     throw new IOException("Release checksum or size mismatch");
-                String notes=data.optString("body","").trim();
+                String notes=manifest.optString("notes","").trim();
                 if(notes.length()>1800)notes=notes.substring(0,1800)+"…";
-                Release release=new Release(version,code,notes,assetUrl(apk,repo,tag,APK),size,hash);
+                // Pin the APK to the manifest version, not the moving latest alias.
+                URL apkUrl=new URL("https://github.com/"+repo+"/releases/download/"+tag+"/"+APK);
+                Release release=new Release(version,code,notes,apkUrl,size,hash);
                 ui(()->listener.complete(release,null));
             }catch(Exception e){
-                android.util.Log.w("IsmeUpdater","Update check failed: "+e.getClass().getSimpleName());
-                ui(()->listener.complete(null,"Could not check for updates. Try again later."));
+                android.util.Log.w("IsmeUpdater","Update check failed: "+diagnostic(e));
+                String error=e instanceof HttpFailure
+                    ?"Could not check for updates (HTTP "+((HttpFailure)e).status+"). Try again later."
+                    :"Could not check for updates. Try again later.";
+                ui(()->listener.complete(null,error));
             }
         });
     }
@@ -146,7 +154,7 @@ final class ReleaseUpdater {
                 if(finished.exists()&&!finished.delete())throw new IOException("Cannot clear previous update");
                 if(dir.getUsableSpace()<release.size+16L*1024*1024)throw new IOException("Not enough storage");
                 if(cancelled.get()||closed)throw new IOException("Cancelled");
-                HttpURLConnection c=open(release.url,false);activeDownload=c;
+                HttpURLConnection c=open(release.url);activeDownload=c;
                 long total=0,last=0;MessageDigest hash=MessageDigest.getInstance("SHA-256");
                 try(InputStream in=c.getInputStream();FileOutputStream out=new FileOutputStream(temp)){
                     byte[] buffer=new byte[32768];int n;
