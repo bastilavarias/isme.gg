@@ -71,6 +71,17 @@ void main(){
     expect(restored.bookmarks.movies,isEmpty);
     expect(restored.movies(),isEmpty);
   });
+  test('refresh reads persisted rows and respects queued writes',()async{
+    SharedPreferences.setMockInitialValues({});
+    final storage=MemoryLibraryPersistence();
+    final history=await History.open(await SharedPreferences.getInstance(),persistence:storage);
+    await storage.writeBookmark(film.id,{...film.toJson(),'addedAt':1});
+    expect(history.bookmarks.movies,isEmpty);
+    await history.bookmarks.refresh();
+    expect(history.bookmarks.contains(film),isTrue);
+    await Future.wait([history.bookmarks.remove(film),history.bookmarks.refresh()]);
+    expect(history.bookmarks.movies,isEmpty);
+  });
   testWidgets('TV opens a saved poster with Select and restores focus after Back',(tester)async{
     SharedPreferences.setMockInitialValues({});
     final history=History.inMemory(await SharedPreferences.getInstance());

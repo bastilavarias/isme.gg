@@ -287,6 +287,7 @@ class NativeEngine {
 /// is explicitly injected by tests; it is never a fallback for database errors.
 abstract class LibraryPersistence {
   Future<Map<String,dynamic>> open(String bookmarks,String history);
+  Future<List<Map<String,dynamic>>> readBookmarks();
   Future<void> writeBookmark(String id,Map<String,dynamic>? row);
   Future<void> writeHistory(String id,Map<String,dynamic>? row);
 }
@@ -296,6 +297,11 @@ class SqliteLibraryPersistence implements LibraryPersistence {
     final raw=await channel.invokeMethod<String>('open',{'bookmarks':bookmarks,'history':history});
     if(raw==null)throw StateError('Local library unavailable');
     return Map<String,dynamic>.from(jsonDecode(raw) as Map);
+  }
+  @override Future<List<Map<String,dynamic>>> readBookmarks() async{
+    final raw=await channel.invokeMethod<String>('readBookmarks');
+    if(raw==null)throw StateError('Local bookmarks unavailable');
+    return (jsonDecode(raw) as List).map((r)=>Map<String,dynamic>.from(r as Map)).toList();
   }
   @override Future<void> writeBookmark(String id,Map<String,dynamic>? row)=>channel.invokeMethod<void>(
     'bookmark',{'id':id,'payload':row==null?null:jsonEncode(row)});
@@ -321,6 +327,8 @@ class MemoryLibraryPersistence implements LibraryPersistence {
     final watchedRows=history.values.toList()..sort((a,b)=>(b['updated'] as int).compareTo(a['updated'] as int));
     return {'bookmarks':savedRows,'history':watchedRows};
   }
+  @override Future<List<Map<String,dynamic>>> readBookmarks() async=>bookmarks.values.toList()
+    ..sort((a,b)=>(b['addedAt'] as int).compareTo(a['addedAt'] as int));
   @override Future<void> writeBookmark(String id,Map<String,dynamic>? row) async{
     if(row==null){bookmarks.remove(id);}else{bookmarks[id]=row;}
   }
@@ -416,7 +424,9 @@ class BookmarkStore extends ChangeNotifier {
   final List<Movie> _items=[];
   int _lastAddedAt=0;
   Future<void> _queue=Future.value();
-  BookmarkStore(this._storage,List<Map<String,dynamic>> rows){
+  BookmarkStore(this._storage,List<Map<String,dynamic>> rows){_replace(rows);}
+  void _replace(List<Map<String,dynamic>> rows){
+    _items.clear();
     for(final row in rows){
       final item=parent(Movie.fromJson(row));
       if(valid(item)&&item.title.isNotEmpty&&!contains(item))_items.add(item);
@@ -442,6 +452,14 @@ class BookmarkStore extends ChangeNotifier {
   static bool valid(Movie movie)=>RegExp(r'^(imdb:tt[0-9]{7,10}|tmdb:(movie|tv):[1-9][0-9]{0,8})$').hasMatch(movie.id);
   List<Movie> get movies=>List.unmodifiable(_items);
   bool contains(Movie movie)=>_items.any((m)=>same(m,movie));
+  Future<void> refresh(){
+    final job=_queue.then((_)async{
+      _replace(await _storage.readBookmarks());
+      notifyListeners();
+    });
+    _queue=job.then<void>((_){},onError:(Object _,StackTrace __){});
+    return job;
+  }
   Future<void> toggle(Movie movie)=>_change(movie,null);
   Future<void> remove(Movie movie)=>_change(movie,false);
   Future<void> _change(Movie movie,bool? save){

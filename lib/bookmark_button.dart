@@ -15,8 +15,14 @@ class _BookmarkButtonState extends State<BookmarkButton>{
   Future<void> toggle() async{
     if(busy)return;
     setState(()=>busy=true);
-    try{await widget.store.toggle(widget.movie);}
-    catch(_){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Could not update My List. Try again.')));}
+    try{
+      await widget.store.toggle(widget.movie);
+      if(mounted){
+        final saved=widget.store.contains(widget.movie);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(saved?'Added to My List':'Removed from My List'),duration:const Duration(seconds:2)));
+      }
+    }
+    catch(e){debugPrint('Bookmark update failed: $e');if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Could not update My List. Try again.')));}
     finally{if(mounted)setState(()=>busy=false);}
   }
   @override Widget build(BuildContext context)=>ListenableBuilder(listenable:widget.store,builder:(_,__){

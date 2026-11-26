@@ -101,6 +101,10 @@ final class UserLibrary {
         return result;
     }
 
+    String readBookmarks() throws Exception {
+        return rows(helper.getReadableDatabase(), "bookmarks", "added_at DESC, rowid ASC").toString();
+    }
+
     void saveBookmark(String id, String payload) throws Exception {
         SQLiteDatabase db = helper.getWritableDatabase();
         if (payload == null) db.delete("bookmarks", "media_id=?", new String[]{id});

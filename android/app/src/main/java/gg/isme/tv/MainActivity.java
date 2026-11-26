@@ -46,6 +46,9 @@ public final class MainActivity extends FlutterActivity {
                         case "open":
                             result.success(library.open(call.argument("bookmarks"), call.argument("history")));
                             break;
+                        case "readBookmarks":
+                            result.success(library.readBookmarks());
+                            break;
                         case "bookmark":
                             library.saveBookmark(call.argument("id"), call.argument("payload"));
                             result.success(null);

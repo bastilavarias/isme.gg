@@ -15,7 +15,14 @@ class MyList extends StatefulWidget {
 }
 class _MyListState extends State<MyList>{
   String filter='All';
-  bool alphabetical=false,opening=false;
+  bool alphabetical=false,opening=false,loading=true,loadFailed=false;
+  @override void initState(){super.initState();reload();}
+  Future<void> reload() async{
+    if(!loading)setState((){loading=true;loadFailed=false;});
+    try{await widget.store.refresh();}
+    catch(e){debugPrint('My List refresh failed: $e');if(mounted)setState(()=>loadFailed=true);}
+    finally{if(mounted)setState(()=>loading=false);}
+  }
   final nodes=<String,FocusNode>{};
   final back=FocusNode(debugLabel:'My List back');
   final scroll=ScrollController();
@@ -80,8 +87,10 @@ class _MyListState extends State<MyList>{
         IconButton(tooltip:alphabetical?'Sort by recently added':'Sort alphabetically',
           onPressed:(){if(scroll.hasClients)scroll.jumpTo(0);setState(()=>alphabetical=!alphabetical);},icon:const Icon(Icons.sort)),
       ])),
+      if(loading)const LinearProgressIndicator(minHeight:2),
+      if(loadFailed)TextButton(onPressed:reload,child:const Text('Could not refresh My List — retry')),
       if(all.isNotEmpty)filters(),
-      Expanded(child:items.isEmpty?MobileEmpty(all.isEmpty?'Your list is empty':'No saved titles in this category',
+      Expanded(child:items.isEmpty&&loading?const Center(child:Text('Loading saved titles…')):items.isEmpty?MobileEmpty(all.isEmpty?'Your list is empty':'No saved titles in this category',
         all.isEmpty?'Save movies and shows from their details page.':'Choose another filter.'):
         LayoutBuilder(builder:(context,box){
           final count=((box.maxWidth-(tv?80:32))/(tv?150:113)).floor().clamp(2,8).toInt();
