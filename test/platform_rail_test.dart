@@ -31,6 +31,29 @@ void main(){
     ];
     expect(prime.matches(rows).map((p)=>p.id),[1,2]);
   });
+  testWidgets('filtered platform rail keeps All visible when far-end service is selected',(tester)async{
+    final key=GlobalKey<PlatformRailState>();
+    final chosen=<String>[];
+    final selected=PlatformBrand.brands.last;
+    await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:Scaffold(body:PlatformRail(
+      key:key,providers:const [],selected:selected,tv:true,
+      onSelected:(p)=>chosen.add(p.key),onUp:(){},onDown:(){}))));
+    await tester.pumpAndSettle();
+    final all=find.byKey(const ValueKey('platform-all'));
+    final allPosition=tester.getTopLeft(all);
+    expect(all.hitTestable(),findsOneWidget);
+    expect(key.currentState!.scroll.offset,greaterThan(0));
+    key.currentState!.focusRemembered();
+    await tester.pumpAndSettle();
+    expect(key.currentState!.nodes.last.hasFocus,isTrue);
+    expect(tester.getTopLeft(all),allPosition);
+    key.currentState!.focusAt(0);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(chosen,['all']);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
   testWidgets('D-pad focus previews platform; select commits only on activation',(tester)async{
     final key=GlobalKey<PlatformRailState>();
     final chosen=<String>[];

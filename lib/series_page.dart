@@ -4,6 +4,7 @@ import 'design.dart';
 import 'engine.dart';
 import 'player.dart';
 import 'next_episode.dart';
+import 'back_navigation.dart';
 
 /// Ignore provider fallback names that merely repeat the episode number.
 String distinctEpisodeTitle(Episode ep){
@@ -24,7 +25,8 @@ class SeriesPage extends StatefulWidget {
   final Movie show;
   final NativeEngine engine;
   final History history;
-  const SeriesPage({super.key,required this.show,required this.engine,required this.history});
+  final EpisodeIdentity? initialEpisode;
+  const SeriesPage({super.key,required this.show,required this.engine,required this.history,this.initialEpisode});
   @override State<SeriesPage> createState()=>_SeriesPageState();
 }
 class _SeriesPageState extends State<SeriesPage> {
@@ -90,12 +92,14 @@ class _SeriesPageState extends State<SeriesPage> {
       if(!mounted||run!=_generation)return;
       setState((){_seasons=list;});
       if(list.isEmpty){setState((){_loading=false;_error='No season information available.';});return;}
-      await _chooseSeason(list.firstWhere((s)=>s.number>0,orElse:()=>list.first).number);
+      final initial=widget.initialEpisode;
+      final season=list.where((s)=>s.number==initial?.season).firstOrNull??list.firstWhere((s)=>s.number>0,orElse:()=>list.first);
+      await _chooseSeason(season.number,initialEpisode:initial?.season==season.number?initial?.episode:null);
     }catch(_){
       if(mounted&&run==_generation)setState((){_loading=false;_error='Season information unavailable. Try again.';});
     }
   }
-  Future<void> _chooseSeason(int number,{bool focusEpisodes=false}) async {
+  Future<void> _chooseSeason(int number,{bool focusEpisodes=false,int? initialEpisode}) async {
     final run=++_generation;
     _focusRevision++;
     final oldNodes=_episodeNodes.values.toList();_episodeNodes.clear();
@@ -105,7 +109,7 @@ class _SeriesPageState extends State<SeriesPage> {
     try{
       final list=await widget.engine.episodes(widget.show,number);
       if(!mounted||run!=_generation)return;
-      setState((){_episodes=list;_highlight=list.firstOrNull;_loading=false;});
+      setState((){_episodes=list;_highlight=list.where((e)=>e.number==initialEpisode).firstOrNull??list.firstOrNull;_loading=false;});
       if(focusEpisodes&&list.isNotEmpty)WidgetsBinding.instance.addPostFrameCallback((_){
         if(mounted&&run==_generation)_focusEpisode(0);
       });
@@ -132,7 +136,7 @@ class _SeriesPageState extends State<SeriesPage> {
   Future<void> _openEpisode(Episode ep) async {
     final season=_season;
     if(season==null)return;
-    if(_openingEpisode)return;
+    if(_openingEpisode||ModalRoute.of(context)?.isCurrent!=true)return;
     _openingEpisode=true;
     final media=episodeMovie(widget.show,season,ep);
     try{
@@ -187,7 +191,7 @@ class _SeriesPageState extends State<SeriesPage> {
     final art=ep?.thumbnail.isNotEmpty==true?ep!.thumbnail:show.art;
     final date=ep==null?'':episodeDateLabel(context,ep.airDate);
     final info=[if(_season!=null&&ep!=null)'S$_season · E${ep.number}',if(ep!=null&&ep.runtime>0)'${ep.runtime} min',if(date.isNotEmpty)date].join('  ·  ');
-    return Scaffold(body:SafeArea(child:Stack(fit:StackFit.expand,children:[
+    return BackNavigationScope(child:Scaffold(body:SafeArea(child:Stack(fit:StackFit.expand,children:[
       Align(alignment:Alignment.topRight,child:SizedBox(width:MediaQuery.sizeOf(context).width*(tv ? .85 : 1),height:MediaQuery.sizeOf(context).height*.78,
         child:AnimatedSwitcher(duration:_motion,layoutBuilder:(current,previous)=>Stack(fit:StackFit.expand,children:[...previous,if(current!=null)current]),
           child:CinemaArt(art,key:ValueKey(art),cacheWidth:1280)))),
@@ -195,7 +199,7 @@ class _SeriesPageState extends State<SeriesPage> {
       const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Colors.transparent,CinemaColors.canvas],stops:[.18,.91]))),
       Padding(padding:EdgeInsets.symmetric(horizontal:tv?40:18,vertical:12),
         child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-          Align(alignment:Alignment.topLeft,child:IconButton(focusNode:_back,onPressed:()=>Navigator.pop(context),icon:const Icon(Icons.arrow_back))),
+          Align(alignment:Alignment.topLeft,child:IconButton(focusNode:_back,onPressed:()=>Navigator.maybePop(context),icon:const Icon(Icons.arrow_back))),
           Expanded(child:Align(alignment:Alignment.bottomLeft,child:SingleChildScrollView(child:ConstrainedBox(
             constraints:BoxConstraints(maxWidth:tv?580:double.infinity),
             child:Column(crossAxisAlignment:CrossAxisAlignment.start,mainAxisSize:MainAxisSize.min,children:[
@@ -219,6 +223,6 @@ class _SeriesPageState extends State<SeriesPage> {
           else _rail(tv),
 
         ])),
-    ])));
+    ]))));
   }
 }

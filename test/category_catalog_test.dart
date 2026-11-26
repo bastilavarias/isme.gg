@@ -9,6 +9,8 @@ import 'package:ismegg/engine.dart';
 import 'package:ismegg/home_sections.dart';
 import 'package:ismegg/main.dart';
 import 'package:ismegg/next_episode.dart';
+import 'package:ismegg/search_page.dart';
+import 'package:ismegg/platform_rail.dart';
 
 class CategoryTestEngine extends NativeEngine {
   final requested=<String>[];
@@ -30,7 +32,12 @@ class CategoryTestEngine extends NativeEngine {
     }
     return fixture(collection);
   }
-  @override Future<List<WatchProvider>> watchPlatforms({String mode='normal',bool artworkOnly=false})async=>[];
+  @override Future<List<WatchProvider>> watchPlatforms({String mode='normal',bool artworkOnly=false})async=>const [
+    WatchProvider(id:8,name:'Netflix',movie:true,tv:true),
+    WatchProvider(id:337,name:'Disney Plus',movie:true,tv:true),
+  ];
+  @override Future<CatalogSnapshot> platformCatalog(List<int> ids,String kind,String row,{String mode='normal'})async=>
+    fixture('platform:${ids.join(",")}:$kind:$row');
   @override Future<String?> providerFor(Movie movie)async=>null;
 }
 
@@ -72,6 +79,94 @@ void main(){
     expect(editorialFallbackMovies('page_pinoy_classics',[
       const Movie(id:'1',title:'Old',year:'1998'),const Movie(id:'2',title:'New',year:'2024')
     ]).map((m)=>m.id),['1']);
+  });
+  testWidgets('TV platform filter relocates selector, preserves focus, and All restores Home',(tester)async{
+    SharedPreferences.setMockInitialValues({});
+    final engine=CategoryTestEngine()..tv=true;
+    addTearDown(engine.dispose);
+    final history=History(await SharedPreferences.getInstance());
+    tester.view.physicalSize=const Size(1280,720);
+    tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:deviceHome(engine,history)));
+    await tester.pumpAndSettle();
+    final rail=find.byType(PlatformRail);
+    PlatformRailState state()=>tester.state<PlatformRailState>(rail);
+    expect(rail,findsOneWidget);
+    expect(tester.getTopLeft(rail).dy,greaterThan(tester.getTopLeft(find.text('Top 10 Movies This Week')).dy));
+    state().focusAt(1);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('catalog:Home:netflix')),findsOneWidget);
+    expect(rail,findsOneWidget);
+    expect(state().nodes[1].hasFocus,isTrue);
+    expect(find.byKey(const ValueKey('platform-all')).hitTestable(),findsOneWidget);
+    expect(tester.getTopLeft(rail).dy,lessThan(tester.getTopLeft(find.text('Popular movies')).dy));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('catalog:Home:disney')),findsOneWidget);
+    expect(state().nodes[2].hasFocus,isTrue);
+    state().focusAt(0);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('catalog:Home:all')),findsOneWidget);
+    expect(tester.getTopLeft(rail).dy,greaterThan(tester.getTopLeft(find.text('Top 10 Movies This Week')).dy));
+    expect(tester.takeException(),isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+  testWidgets('TV navbar switches on remote focus but Search and Menu require Select',(tester)async{
+    SharedPreferences.setMockInitialValues({});
+    final engine=CategoryTestEngine()..tv=true;
+    addTearDown(engine.dispose);
+    final history=History(await SharedPreferences.getInstance());
+    tester.view.physicalSize=const Size(1280,720);
+    tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:deviceHome(engine,history)));
+    await tester.pumpAndSettle();
+    FocusNode tab(String label)=>tester.widget<TextButton>(find.byKey(ValueKey('nav-$label'))).focusNode!;
+    Future<void> right()async{
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+    }
+    void page(String section)=>expect(find.byKey(ValueKey('catalog:$section:all')),findsOneWidget);
+    tab('Home').requestFocus();
+    await tester.pumpAndSettle();
+    page('Home');
+    await right();
+    expect(tab('Search').hasFocus,isTrue);
+    page('Home');
+    expect(find.byType(CinemaSearchPage),findsNothing);
+    await right();
+    page('Movies');
+    expect(tab('Movies').hasFocus,isTrue);
+    await right();
+    page('Series');
+    await right();
+    page('Anime');
+    await right();
+    page('Pinoy');
+    await right();
+    page('Pinoy');
+    expect(find.byType(PopupMenuItem),findsNothing);
+    expect(tester.widget<IconButton>(find.byTooltip('Menu')).focusNode!.hasFocus,isTrue);
+    tab('Search').requestFocus();
+    await tester.pumpAndSettle();
+    page('Pinoy');
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.byType(CinemaSearchPage),findsOneWidget);
+    tab('Home').requestFocus();
+    await tester.pumpAndSettle();
+    page('Home');
+    expect(tester.takeException(),isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
   for(final tv in [true,false]){
     testWidgets('${tv?"TV":"Mobile"}: category nav loads independent catalogs and ignores a late response',(tester)async{

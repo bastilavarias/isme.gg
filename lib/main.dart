@@ -14,6 +14,8 @@ import 'mobile/mobile_home.dart';
 import 'support_menu.dart';
 import 'home_sections.dart';
 import 'category_catalog.dart';
+import 'back_navigation.dart';
+import 'next_episode.dart';
 
 void main(){ WidgetsFlutterBinding.ensureInitialized(); PaintingBinding.instance.imageCache.maximumSizeBytes=48*1024*1024; PaintingBinding.instance.imageCache.maximumSize=120; runApp(const IsmeApp()); }
 class IsmeApp extends StatefulWidget {
@@ -48,6 +50,7 @@ class CinemaHome extends StatefulWidget {
 }
 class _CinemaHomeState extends State<CinemaHome> {
   String section='Home';
+  bool openingTitle=false;
   final verifiedWeekly=<String>{};
   String? featuredId;
   bool get mainHome=>section=='Home'&&!filtered;
@@ -115,19 +118,28 @@ class _CinemaHomeState extends State<CinemaHome> {
     if(platform.key==next.key)return;
     catalogGeneration++;
     setState((){
-      platform=next;failures.clear();
+      platform=next;failures.clear();featuredId=null;rowKeys.clear();
       // SQLite retains recent platform results; keep only the selected
       // platform's shelves in the Dart heap.
       shelves.removeWhere((key,_)=>key.startsWith('platform:')&&!key.startsWith('platform:${next.key}:'));
     });
     selected.value=collections.keys.expand((k)=>shelves[k]??<Movie>[]).firstOrNull;
-    scrollTop();load();
+    if(homeScroll.hasClients)homeScroll.jumpTo(0);
+    load();
+    WidgetsBinding.instance.addPostFrameCallback((_){
+      if(!mounted||searching||platform.key!=next.key||ModalRoute.of(context)?.isCurrent!=true)return;
+      if(homeScroll.hasClients)homeScroll.jumpTo(0);
+      if(engine.tv){
+        if(filtered)platformRailKey.currentState?.focusRemembered();
+        else homeNav.requestFocus();
+      }
+    });
   }
   void focusFirstShelf(){
     final rows=visibleRows;
     if(rows.isNotEmpty)rowKeys[rows.first]?.currentState?.focusRemembered();
     else if(platformStatusFocus.context!=null)platformStatusFocus.requestFocus();
-    else if(mainHome)platformRailKey.currentState?.focusRemembered();
+    else if(mainHome||filtered)platformRailKey.currentState?.focusRemembered();
   }
   List<Movie> get continued=>widget.history.movies().where((m)=>belongsToCategory(m,section,
     shelves.values.expand((row)=>row))).toList();
@@ -302,7 +314,7 @@ class _CinemaHomeState extends State<CinemaHome> {
       finally{if(mounted&&n==generation)setState(()=>searchBusy=false);}
     });
   }
-  void showSection(String name){
+  void showSection(String name,{bool focusNav=true}){
     if(!searching&&section==name&&!filtered){scrollTop();return;}
     catalogGeneration++;
     if(homeScroll.hasClients)homeScroll.jumpTo(0);
@@ -313,9 +325,9 @@ class _CinemaHomeState extends State<CinemaHome> {
     });
     selected.value=collections.keys.expand((k)=>shelves[k]??<Movie>[]).firstOrNull;
     WidgetsBinding.instance.addPostFrameCallback((_){
-      if(mounted&&!searching&&section==name){
+      if(mounted&&!searching&&section==name&&ModalRoute.of(context)?.isCurrent==true){
         if(homeScroll.hasClients)homeScroll.jumpTo(0);
-        sectionNav.requestFocus();
+        if(focusNav)sectionNav.requestFocus();
       }
     });
     load();
@@ -327,15 +339,27 @@ class _CinemaHomeState extends State<CinemaHome> {
     });
   }
   Future<void> open(Movie m) async {
-    if(m.id.startsWith('tmdb:movie:')){
-      try{m=await engine.identifyMovie(m);}catch(_){
-        if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Movie details unavailable. Check your metadata connection.')));
-        return;
-      }
-      if(!mounted)return;
+    if(openingTitle||ModalRoute.of(context)?.isCurrent!=true)return;
+    openingTitle=true;
+    try{
+      if(m.id.startsWith('tmdb:movie:')&&!m.isEpisode)m=await engine.identifyMovie(m);
+      if(!mounted||ModalRoute.of(context)?.isCurrent!=true)return;
+      final episode=EpisodeIdentity.parse(m);
+      final title=episode?.parent(m)??m;
+      await pushTitleRoute(context,title.episodic?
+        SeriesPage(show:title,engine:engine,history:widget.history,initialEpisode:episode):
+        Details(movie:title,engine:engine,history:widget.history),
+        resumePlayer:episode==null?null:CinemaPlayer(movie:m,engine:engine,history:widget.history));
+    }catch(_){
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Movie details unavailable. Check your metadata connection.')));
+    }finally{
+      openingTitle=false;
+      if(mounted)setState((){});
     }
-    await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>m.isEpisode?CinemaPlayer(movie:m,engine:engine,history:widget.history):m.episodic?SeriesPage(show:m,engine:engine,history:widget.history):Details(movie:m,engine:engine,history:widget.history)));
-    if(mounted)setState((){});
+  }
+  bool backToHome(){
+    if(searching||!mainHome){showSection('Home');return true;}
+    return false;
   }
   Future<void> manual() async {
     final controller=TextEditingController();
@@ -360,18 +384,19 @@ class _CinemaHomeState extends State<CinemaHome> {
         if(tv)const SizedBox(width:100,child:Wordmark()),
         Expanded(child:Center(child:SingleChildScrollView(scrollDirection:Axis.horizontal,
           child:Row(mainAxisSize:MainAxisSize.min,children:[
-            navButton('Home',homeNav,!searching&&section=='Home',()=>showSection('Home')),
+            navButton('Home',homeNav,!searching&&section=='Home',()=>showSection('Home'),category:'Home'),
             navButton('Search',searchNav,searching,showSearch,icon:Icons.search_rounded),
             navDivider(),
-            navButton('Movies',movieNav,!searching&&section=='Movies',()=>showSection('Movies')),
-            navButton('TV Series',seriesNav,!searching&&section=='Series',()=>showSection('Series')),
-            navButton('Anime',animeNav,!searching&&section=='Anime',()=>showSection('Anime')),
+            navButton('Movies',movieNav,!searching&&section=='Movies',()=>showSection('Movies'),category:'Movies'),
+            navButton('TV Series',seriesNav,!searching&&section=='Series',()=>showSection('Series'),category:'Series'),
+            navButton('Anime',animeNav,!searching&&section=='Anime',()=>showSection('Anime'),category:'Anime'),
             navDivider(),
-            navButton('Pinoy',pinoyNav,!searching&&section=='Pinoy',()=>showSection('Pinoy')),
+            navButton('Pinoy',pinoyNav,!searching&&section=='Pinoy',()=>showSection('Pinoy'),category:'Pinoy'),
           ])))),
         SizedBox(width:tv?100:40,child:Align(alignment:Alignment.centerRight,child:IconButton(key:menuAnchor,focusNode:menuNav,tooltip:'Menu',onPressed:openNavMenu,icon:const Icon(Icons.more_vert))))
       ])));
-    return Scaffold(body:SafeArea(child:Shortcuts(shortcuts:const {
+    return HomeBackGuard(locationKey:'$section:$searching:${platform.key}',navigateHome:backToHome,
+      child:Scaffold(body:SafeArea(child:Shortcuts(shortcuts:const {
       SingleActivator(LogicalKeyboardKey.select):ActivateIntent(),
       SingleActivator(LogicalKeyboardKey.enter):ActivateIntent(),
     },child:Stack(children:[
@@ -380,7 +405,7 @@ class _CinemaHomeState extends State<CinemaHome> {
         nav,
         Expanded(child:searching?buildSearch(tv):KeyedSubtree(key:ValueKey('catalog:$section:${platform.key}'),child:buildHome(tv)))
       ]))
-    ]))));
+    ])))));
   }
   Future<void> openNavMenu() async {
     final anchor=menuAnchor.currentContext?.findRenderObject();
@@ -397,21 +422,33 @@ class _CinemaHomeState extends State<CinemaHome> {
   Widget navDivider()=>Padding(
     padding:EdgeInsets.symmetric(horizontal:engine.tv?9:5),
     child:ExcludeSemantics(child:Container(width:1,height:19,color:const Color(0x26F5F1EB))));
-  Widget navButton(String label,FocusNode node,bool active,VoidCallback action,{IconData? icon})=>Builder(builder:(ctx)=>Semantics(
+  Widget navButton(String label,FocusNode node,bool active,VoidCallback action,{IconData? icon,String? category})=>Builder(builder:(ctx)=>Semantics(
     label:icon!=null?label:null,selected:active,
-    child:TextButton(
-      key:ValueKey('nav-$label'),focusNode:node,autofocus:label=='Home',onFocusChange:(focused){
-        if(!focused)return;
-        if(!searching)scrollTop();
-        WidgetsBinding.instance.addPostFrameCallback((_){
-          if(ctx.mounted&&node.hasFocus)Scrollable.ensureVisible(ctx,duration:motion,curve:Curves.easeOutCubic);
-        });
-      },
-      onPressed:action,style:TextButton.styleFrom(backgroundColor:active?const Color(0x33444444):Colors.transparent,
-        foregroundColor:active?CinemaColors.accent:CinemaColors.ink,
-        minimumSize:Size(icon!=null?40:0,40),
-        padding:EdgeInsets.symmetric(horizontal:engine.tv?10:8,vertical:10)),
-      child:icon==null?Text(label,maxLines:1):Tooltip(message:label,child:Icon(icon,size:22)))));
+    child:MouseRegion(
+      // Mouse hover on a TV browser/emulator behaves like remote focus.
+      // Search and the menu deliberately remain explicit actions.
+      onEnter:engine.tv&&category!=null?(_){
+        if(ModalRoute.of(ctx)?.isCurrent==true)node.requestFocus();
+      }:null,
+      child:TextButton(
+        key:ValueKey('nav-$label'),focusNode:node,autofocus:label=='Home',onFocusChange:(focused){
+          if(!focused)return;
+          if(!searching)scrollTop();
+          WidgetsBinding.instance.addPostFrameCallback((_){
+            if(!ctx.mounted||!node.hasFocus||ModalRoute.of(ctx)?.isCurrent!=true)return;
+            Scrollable.ensureVisible(ctx,duration:motion,curve:Curves.easeOutCubic);
+            // Focus, not Select, changes category. Never steal focus back from
+            // a newer remote action or reload a category already on screen.
+            if(engine.tv&&category!=null&&(searching||section!=category)){
+              showSection(category,focusNav:false);
+            }
+          });
+        },
+        onPressed:action,style:TextButton.styleFrom(backgroundColor:active?const Color(0x33444444):Colors.transparent,
+          foregroundColor:active?CinemaColors.accent:CinemaColors.ink,
+          minimumSize:Size(icon!=null?40:0,40),
+          padding:EdgeInsets.symmetric(horizontal:engine.tv?10:8,vertical:10)),
+        child:icon==null?Text(label,maxLines:1):Tooltip(message:label,child:Icon(icon,size:22))))));
   Widget buildSearch(bool tv)=>CinemaSearchPage(key:searchPageKey,engine:engine,controller:search,
     movies:search.text.trim().isEmpty?popularMovies:results,busy:searchBusy||(search.text.trim().isEmpty&&loading),
     error:searchError,onQuery:query,onOpen:open,onNav:()=>searchNav.requestFocus());
@@ -483,16 +520,18 @@ class _CinemaHomeState extends State<CinemaHome> {
 class Details extends StatelessWidget {
   final Movie movie;final NativeEngine engine;final History history;
   const Details({super.key,required this.movie,required this.engine,required this.history});
-  @override Widget build(BuildContext context)=>Scaffold(body:SafeArea(child:Stack(fit:StackFit.expand,children:[
+  @override Widget build(BuildContext context)=>BackNavigationScope(child:Scaffold(body:SafeArea(child:Stack(fit:StackFit.expand,children:[
     CinemaArt(movie.art,cacheWidth:1280),
     const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Color(0x6611110F),CinemaColors.canvas],stops:[0,.86]))),
     Padding(padding:EdgeInsets.all(engine.tv?40:20),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      IconButton(onPressed:()=>Navigator.pop(context),icon:const Icon(Icons.arrow_back)),
+      IconButton(onPressed:()=>Navigator.maybePop(context),icon:const Icon(Icons.arrow_back)),
       Expanded(child:Align(alignment:Alignment.bottomLeft,child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:650),child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         Text(movie.title,style:TextStyle(fontWeight:FontWeight.w800,fontSize:engine.tv?44:34)),const SizedBox(height:8),Text(movie.year),
         const SizedBox(height:12),Text(movie.description,style:const TextStyle(fontSize:16)),const SizedBox(height:22),
-        FilledButton.icon(autofocus:true,onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:movie,engine:engine,history:history))),icon:const Icon(Icons.play_arrow),label:Text(history.position(movie)>Duration.zero?'Resume':'Play'))
+        FilledButton.icon(autofocus:true,onPressed:(){
+          if(ModalRoute.of(context)?.isCurrent==true)Navigator.push(context,MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:movie,engine:engine,history:history)));
+        },icon:const Icon(Icons.play_arrow),label:Text(history.position(movie)>Duration.zero?'Resume':'Play'))
       ])))))
     ]))
-  ])));
+  ]))));
 }

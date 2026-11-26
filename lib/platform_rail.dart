@@ -42,6 +42,30 @@ class PlatformRailState extends State<PlatformRail>{
   final nodes=List.generate(PlatformBrand.brands.length,(i)=>FocusNode(debugLabel:'Platform $i'));
   final scroll=ScrollController();
   int cursor=0;
+  bool get hasActiveFocus=>nodes.any((node)=>node.hasFocus);
+  bool get filtered=>widget.selected.key!='all';
+  @override void initState(){
+    super.initState();
+    if(filtered)_revealSelection();
+  }
+  @override void didUpdateWidget(covariant PlatformRail oldWidget){
+    super.didUpdateWidget(oldWidget);
+    if(oldWidget.selected.key!=widget.selected.key&&filtered)_revealSelection();
+  }
+  void _revealSelection(){
+    WidgetsBinding.instance.addPostFrameCallback((_){
+      if(!mounted||!filtered||!scroll.hasClients)return;
+      final i=PlatformBrand.brands.indexWhere((brand)=>brand.key==widget.selected.key);
+      if(i<=0)return;
+      final object=nodes[i].context?.findRenderObject();
+      if(object!=null&&object.attached){
+        // Reveal the selected service horizontally only. Do not scroll
+        // mobile's vertical catalog away from its hero.
+        scroll.position.ensureVisible(object,alignment:0,
+          duration:Duration.zero);
+      }
+    });
+  }
   void focusRemembered(){
     final i=PlatformBrand.brands.indexWhere((b)=>b.key==widget.selected.key);
     focusAt(i<0?cursor:i);
@@ -62,15 +86,27 @@ class PlatformRailState extends State<PlatformRail>{
     return KeyEventResult.ignored;
   }
   @override void dispose(){for(final node in nodes)node.dispose();scroll.dispose();super.dispose();}
+  Widget tile(int i){
+    final tv=widget.tv,brand=PlatformBrand.brands[i];
+    return Padding(padding:const EdgeInsets.only(right:10),
+      child:SizedBox(width:i==0&&filtered?(tv?104:84):(tv?146:118),height:tv?88:74,
+        child:RemoteTile(key:ValueKey('platform-${brand.key}'),focusNode:nodes[i],label:brand.name,animateFocus:true,
+          onFocused:(){cursor=i;},onPressed:()=>widget.onSelected(brand),
+          child:_BrandCard(brand:brand,logo:brand.logo(widget.providers),selected:widget.selected.key==brand.key))));
+  }
   @override Widget build(BuildContext context){
-    final tv=widget.tv;
+    final tv=widget.tv,inset=tv?40.0:16.0;
     return Focus(canRequestFocus:false,onKeyEvent:keys,child:Padding(padding:const EdgeInsets.only(bottom:22),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      Padding(padding:EdgeInsets.symmetric(horizontal:tv?40:16),child:const Text('Explore platforms',style:TextStyle(fontSize:21,fontWeight:FontWeight.w700))),
+      Padding(padding:EdgeInsets.symmetric(horizontal:inset),child:const Text('Explore platforms',style:TextStyle(fontSize:21,fontWeight:FontWeight.w700))),
       const SizedBox(height:10),
-      SingleChildScrollView(controller:scroll,scrollDirection:Axis.horizontal,padding:EdgeInsets.symmetric(horizontal:tv?40:16),child:Row(children:[
-        for(var i=0;i<PlatformBrand.brands.length;i++) Padding(padding:const EdgeInsets.only(right:10),child: SizedBox(width:tv?146:118,height:tv?88:74,
-          child:RemoteTile(focusNode:nodes[i],label:PlatformBrand.brands[i].name,animateFocus:true,
-            onFocused:(){cursor=i;},onPressed:()=>widget.onSelected(PlatformBrand.brands[i]),child:_BrandCard(brand:PlatformBrand.brands[i],logo:PlatformBrand.brands[i].logo(widget.providers),selected:widget.selected.key==PlatformBrand.brands[i].key)))),
+      // The All tile remains visible when browsing any service, even if
+      // the horizontal brand list has scrolled to its far end.
+      Padding(padding:EdgeInsets.only(left:filtered?inset:0),child:Row(children:[
+        if(filtered)tile(0),
+        Expanded(child:SingleChildScrollView(controller:scroll,scrollDirection:Axis.horizontal,
+          padding:EdgeInsets.only(left:filtered?0:inset,right:inset),child:Row(children:[
+            for(var i=filtered?1:0;i<PlatformBrand.brands.length;i++)tile(i),
+          ]))),
       ])),
     ])));
   }

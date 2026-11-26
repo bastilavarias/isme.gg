@@ -4,6 +4,7 @@ import '../engine.dart';
 import '../next_episode.dart';
 import '../series_page.dart' show distinctEpisodeTitle, episodeDateLabel;
 import '../player.dart';
+import '../back_navigation.dart';
 import 'mobile_library.dart';
 
 class MobileDetails extends StatefulWidget {
@@ -54,11 +55,11 @@ class _MobileDetailsState extends State<MobileDetails>{
     if(mounted&&result!=null&&result!=season)await loadEpisodes(result);
   }
   Future<void> play(Movie item) async{
-    if(opening)return;
+    if(opening||ModalRoute.of(context)?.isCurrent!=true)return;
     setState(()=>opening=true);
     try{
       final resolved=await widget.engine.identifyMovie(item);
-      if(!mounted)return;
+      if(!mounted||ModalRoute.of(context)?.isCurrent!=true)return;
       await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:resolved,engine:widget.engine,history:widget.library.history)));
     }catch(_){
       if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Playback information is unavailable.')));
@@ -71,13 +72,13 @@ class _MobileDetailsState extends State<MobileDetails>{
     final first=episodes.where((e)=>aired(e,DateTime.now())).firstOrNull;
     final playable=resumed??(movie.episodic?(first==null||season==null?null:episodeMovie(movie,season!,first)):movie);
     final landscape=MediaQuery.sizeOf(context).width>MediaQuery.sizeOf(context).height;
-    return Scaffold(body:SafeArea(child:CustomScrollView(slivers:[
+    return BackNavigationScope(child:Scaffold(body:SafeArea(child:CustomScrollView(slivers:[
       SliverToBoxAdapter(child:Stack(children:[
         SizedBox(height:landscape?220:260,width:double.infinity,child:Stack(fit:StackFit.expand,children:[
           CinemaArt(movie.art,cacheWidth:960),
           const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Color(0x55000000),Colors.transparent,CinemaColors.canvas],stops:[0,.40,1]))),
         ])),
-        Positioned(top:8,left:8,child:IconButton.filledTonal(tooltip:'Back',onPressed:()=>Navigator.pop(context),icon:const Icon(Icons.arrow_back))),
+        Positioned(top:8,left:8,child:IconButton.filledTonal(tooltip:'Back',onPressed:()=>Navigator.maybePop(context),icon:const Icon(Icons.arrow_back))),
       ])),
       SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.fromLTRB(16,0,16,20),child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
         Text(movie.title,style:const TextStyle(fontSize:29,height:1.12,fontWeight:FontWeight.w800)),
@@ -121,6 +122,6 @@ class _MobileDetailsState extends State<MobileDetails>{
             const Divider(height:1,color:Color(0x22FFFFFF)),
           ]);
         })),
-    ])));
+    ]))));
   }
 }

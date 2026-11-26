@@ -7,6 +7,8 @@ import '../player.dart';
 import '../support_menu.dart';
 import '../home_sections.dart';
 import '../category_catalog.dart';
+import '../back_navigation.dart';
+import '../next_episode.dart';
 import 'mobile_details.dart';
 import 'mobile_library.dart';
 import 'mobile_widgets.dart';
@@ -153,6 +155,9 @@ class _MobileHomeState extends State<MobileHome>{
       category='Home';
     });
     if(homeScroll.hasClients)homeScroll.jumpTo(0);
+    WidgetsBinding.instance.addPostFrameCallback((_){
+      if(mounted&&tab==0&&platform.key==brand.key&&homeScroll.hasClients)homeScroll.jumpTo(0);
+    });
     unawaited(load());
   }
   List<Movie> unique(Iterable<Movie> items,{int limit=100}){
@@ -200,8 +205,11 @@ class _MobileHomeState extends State<MobileHome>{
     if(tab==1)rememberSearch();
     try{
       final resolved=await engine.identifyMovie(movie);
-      if(!mounted)return;
-      await Navigator.of(context).push(MaterialPageRoute(builder:(_)=>resolved.isEpisode?CinemaPlayer(movie:resolved,engine:engine,history:widget.history):MobileDetails(movie:resolved,engine:engine,library:library)));
+      if(!mounted||ModalRoute.of(context)?.isCurrent!=true)return;
+      final episode=EpisodeIdentity.parse(resolved);
+      final title=episode?.parent(resolved)??resolved;
+      await pushTitleRoute(context,MobileDetails(movie:title,engine:engine,library:library),
+        resumePlayer:episode==null?null:CinemaPlayer(movie:resolved,engine:engine,history:widget.history));
     }catch(_){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Title details are unavailable.')));}
     finally{opening=false;if(mounted)setState((){});}
   }
@@ -345,6 +353,10 @@ class _MobileHomeState extends State<MobileHome>{
       if(mounted&&tab==1)searchFocus.requestFocus();
     });
   }
+  bool backToHome(){
+    if(tab!=0||!mainHome){setCategory('Home');return true;}
+    return false;
+  }
   @override Widget build(BuildContext context){
     final page=tab==1?searchPage():home();
     final landscape=MediaQuery.orientationOf(context)==Orientation.landscape;
@@ -361,13 +373,14 @@ class _MobileHomeState extends State<MobileHome>{
       ])),
       Expanded(child:PageStorage(bucket:pageStorage,child:KeyedSubtree(key:ValueKey('$tab:$category:${platform.key}'),child:page))),
     ]);
-    return Scaffold(
+    return HomeBackGuard(locationKey:'$tab:$category:${platform.key}',navigateHome:backToHome,
+      child:Scaffold(
       body:SafeArea(bottom:landscape||keyboard,child:Row(children:[
         if(landscape&&!keyboard)sideNav(),
         Expanded(child:content),
       ])),
       bottomNavigationBar:landscape||keyboard?null:bottomNav(),
-    );
+    ));
   }
 }
 class _Featured extends StatefulWidget{

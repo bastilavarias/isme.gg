@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'playback_recovery.dart';
 import 'player_preferences.dart';
 import 'next_episode.dart';
+import 'back_navigation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -49,7 +50,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   void _touchTap(){
     if(_touchLocked||closed||leaving)return;
-    if(controls){hide?.cancel();setState(()=>controls=false);}
+    if(controls)hideControls();
     else showControls();
   }
   late Movie _movie;
@@ -420,14 +421,29 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   Future<void> save(VideoPlayerController c) async {
     if(widget.magnet.isEmpty&&c.value.isInitialized){try{await widget.history.save(_movie,c.value.position,c.value.duration);}catch(_){}}
   }
+  // Manual dismissal and idle timeout share the same animated visibility
+  // state. Restore focus to the video so invisible buttons cannot be used.
+  void hideControls(){
+    hide?.cancel();
+    if(!mounted||closed||leaving||!controls)return;
+    setState(()=>controls=false);
+    playerFocus.requestFocus();
+  }
+  void handleBack(){
+    if(!currentRoute||settingsOpen)return;
+    if(backHidesPlaybackControls(controlsVisible:controls,
+        playbackReady:player?.value.isInitialized==true&&!busy&&error==null)){
+      hideControls();
+      return;
+    }
+    unawaited(leave());
+  }
   void armControlsTimer(){
     hide?.cancel();
     if(!closed&&!settingsOpen&&!_touchLocked&&controls&&player?.value.isPlaying==true&&!_nextFocus.hasFocus&&!_creditsFocus.hasFocus){
       hide=Timer(const Duration(seconds:6),(){
         if(!mounted||closed||settingsOpen||player?.value.isPlaying!=true||_nextFocus.hasFocus||_creditsFocus.hasFocus)return;
-        // Keep a focus target mounted even when every control is hidden.
-        playerFocus.requestFocus();
-        setState(()=>controls=false);
+        hideControls();
       });
     }
   }
@@ -444,7 +460,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   bool get currentRoute=>mounted&&!closed&&!leaving&&ModalRoute.of(context)?.isCurrent==true;
   bool fallbackRemote(KeyEvent event){
-    if(!currentRoute||settingsOpen)return false;
+    if(!currentRoute||settingsOpen||isBackKey(event.logicalKey))return false;
     if(event is KeyDownEvent||event is KeyRepeatEvent){
       // Descendant shortcuts can consume directional keys before the parent
       // receives them. Renew visibility independently, without consuming them.
@@ -462,9 +478,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(event is! KeyDownEvent&&event is! KeyRepeatEvent)return KeyEventResult.ignored;
     final key=event.logicalKey;
     final repeat=event is KeyRepeatEvent;
-    if(key==LogicalKeyboardKey.escape||key==LogicalKeyboardKey.goBack){
-      if(!repeat)unawaited(leave());return KeyEventResult.handled;
-    }
+    if(isBackKey(key))return KeyEventResult.ignored;
     if(key==LogicalKeyboardKey.mediaPlayPause||key==LogicalKeyboardKey.mediaPlay||
         key==LogicalKeyboardKey.mediaPause||key==LogicalKeyboardKey.space){
       if(!repeat){
@@ -676,15 +690,20 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   Future<void> shutdown() async {
     if(closed)return;closed=true;generation++;subtitleRevision++;cancelAttempt();hide?.cancel();saveTimer?.cancel();watchdog?.cancel();_stopCountdown();_cancelPreparation();
     final c=player;player=null;
-    if(c!=null){await save(c);await c.dispose();}
+    if(c!=null){await save(c);try{await c.dispose();}catch(_){}}
     // Cancel engine while a pending initialization/poll is in flight.
     try{await widget.engine.stop();}catch(_){}
     final job=pending;if(job!=null){try{await job;}catch(_){}}
     try{await widget.engine.stop();}catch(_){}
   }
   Future<void> leave() async {
-    if(leaving)return;setState(()=>leaving=true);await shutdown();await _restoreMobileDisplay();
-    if(mounted)Navigator.of(context).pop();
+    if(leaving||!currentRoute)return;
+    setState(()=>leaving=true);
+    try{await shutdown();}
+    finally{
+      await _restoreMobileDisplay();
+      if(mounted)popCurrentPage(context);
+    }
   }
   @override void dispose(){unawaited(widget.engine.setPlaybackActive(false));HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());unawaited(_restoreMobileDisplay());playerFocus.dispose();for(final node in [playFocus,backFocus,debugFocus,seekFocus,rewindFocus,forwardFocus,ccFocus,audioFocus,sourceFocus,_nextFocus,_creditsFocus]){node.dispose();}super.dispose();}
   String clock(Duration d){final h=d.inHours,m=d.inMinutes.remainder(60).toString().padLeft(2,'0'),s=d.inSeconds.remainder(60).toString().padLeft(2,'0');return h>0?'$h:$m:$s':'$m:$s';}
@@ -725,7 +744,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     return ExcludeFocus(excluding:!visible,child:IgnorePointer(ignoring:!visible,
       child:AnimatedSlide(duration:motion,curve:Curves.easeOutCubic,
         offset:visible?Offset.zero:Offset(0,top?-.12:.12),
-        child:AnimatedOpacity(duration:motion,opacity:visible?1:0,child:child))));
+        child:AnimatedOpacity(duration:motion,curve:Curves.easeOutCubic,opacity:visible?1:0,child:child))));
   }
   Widget loadingView({required String caption,String? percentage}){
     return Center(child:Column(mainAxisSize:MainAxisSize.min,children:[
@@ -843,7 +862,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   @override Widget build(BuildContext context){
     final c=player;
-    return PopScope(canPop:leaving,onPopInvokedWithResult:(didPop,_) {if(!didPop)unawaited(leave());},
+    return BackNavigationScope(onBack:handleBack,
       child:Scaffold(backgroundColor:CinemaColors.black,body:SafeArea(child:Focus(
       focusNode:playerFocus,autofocus:true,onKeyEvent:(_,event)=>handleRemote(event),
       child:Shortcuts(shortcuts:const {SingleActivator(LogicalKeyboardKey.select):ActivateIntent(),SingleActivator(LogicalKeyboardKey.enter):ActivateIntent()},child:Stack(fit:StackFit.expand,children:[
@@ -876,7 +895,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
             colors:[Color(0xDD000000),Colors.transparent])),
           padding:EdgeInsets.fromLTRB(widget.engine.tv?24:8,8,widget.engine.tv?24:8,22),
           child:Row(children:[
-            controlButton(backFocus,'Back',Icons.arrow_back,leave,compact:true),
+            controlButton(backFocus,'Back',Icons.arrow_back,()=>Navigator.maybePop(context),compact:true),
             Expanded(child:Text(_movie.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:20,fontWeight:FontWeight.w600))),
             if(!widget.engine.tv&&c!=null)_touchButton('Lock controls',Icons.lock_open,_toggleLock),
             if(kDebugMode&&widget.engine.tv)controlButton(debugFocus,'Playback diagnostics',Icons.bug_report_outlined,showDiagnostics,compact:true),
