@@ -40,6 +40,8 @@ jobs:
         with:
           flutter-version: ${{ steps.toolchain.outputs.flutter }}
           channel: stable
+          # Kotlin's incremental caches require plugin sources and the checkout on one drive.
+          pub-cache-path: '${{ runner.temp }}/pub-cache'
       - name: Install shared Android SDK packages
         shell: powershell
         run: |
