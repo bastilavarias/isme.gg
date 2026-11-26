@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ismegg/engine.dart';
 import 'package:ismegg/design.dart';
 import 'package:ismegg/my_list.dart';
+import 'package:ismegg/bookmark_button.dart';
 import 'package:ismegg/next_episode.dart';
 
 const film=Movie(id:'imdb:tt1234567',title:'Film',tmdbId:42);
@@ -81,6 +82,25 @@ void main(){
     expect(history.bookmarks.contains(film),isTrue);
     await Future.wait([history.bookmarks.remove(film),history.bookmarks.refresh()]);
     expect(history.bookmarks.movies,isEmpty);
+  });
+  testWidgets('TV remote press saves once even when Select repeats',(tester)async{
+    SharedPreferences.setMockInitialValues({});
+    final history=History.inMemory(await SharedPreferences.getInstance());
+    final focus=FocusNode();addTearDown(focus.dispose);
+    await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:Scaffold(
+      body:Center(child:BookmarkButton(movie:film,store:history.bookmarks,tv:true,focusNode:focus)))));
+    focus.requestFocus();await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    expect(history.bookmarks.contains(film),isTrue);
+    await tester.pump(const Duration(milliseconds:500));
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(history.bookmarks.contains(film),isTrue);
+    expect(find.text('Saved'),findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
   testWidgets('TV opens a saved poster with Select and restores focus after Back',(tester)async{
     SharedPreferences.setMockInitialValues({});

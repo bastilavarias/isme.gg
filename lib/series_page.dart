@@ -240,7 +240,7 @@ class _SeriesPageState extends State<SeriesPage> {
           Row(children:[
             IconButton(focusNode:_back,onPressed:()=>Navigator.maybePop(context),icon:const Icon(Icons.arrow_back)),
             const SizedBox(width:12),
-            BookmarkButton(movie:show,store:widget.history.bookmarks),
+            BookmarkButton(movie:show,store:widget.history.bookmarks,tv:widget.engine.tv),
           ]),
           Expanded(child:Align(alignment:Alignment.bottomLeft,child:SingleChildScrollView(child:ConstrainedBox(
             constraints:BoxConstraints(maxWidth:tv?580:double.infinity),

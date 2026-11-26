@@ -550,7 +550,7 @@ class Details extends StatelessWidget {
           FilledButton.icon(autofocus:true,onPressed:(){
             if(ModalRoute.of(context)?.isCurrent==true)Navigator.push(context,MaterialPageRoute(builder:(_)=>CinemaPlayer(movie:movie,engine:engine,history:history)));
           },icon:const Icon(Icons.play_arrow),label:Text(history.position(movie)>Duration.zero?'Resume':'Play')),
-          BookmarkButton(movie:movie,store:history.bookmarks),
+          BookmarkButton(movie:movie,store:history.bookmarks,tv:engine.tv),
         ])
       ])))))
     ]))
