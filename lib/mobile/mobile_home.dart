@@ -31,6 +31,7 @@ class _MobileHomeState extends State<MobileHome>{
   final query=TextEditingController();
   final searchFocus=FocusNode();
   final pageStorage=PageStorageBucket();
+  final menuAnchor=GlobalKey();
   late final MobileLibrary library;
   List<WatchProvider> directory=[],artwork=[];
   PlatformBrand platform=PlatformBrand.all;
@@ -215,7 +216,17 @@ class _MobileHomeState extends State<MobileHome>{
     }catch(_){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Title details are unavailable.')));}
     finally{opening=false;if(mounted)setState((){});}
   }
-  Future<void> settings()=>openSupportMenu(context,engine,()=>showSupportSheet(context,engine));
+  Future<void> settings() async{
+    final anchor=menuAnchor.currentContext?.findRenderObject();
+    final overlay=Navigator.of(context).overlay?.context.findRenderObject();
+    if(anchor is! RenderBox||overlay is! RenderBox)return;
+    final rect=anchor.localToGlobal(Offset.zero,ancestor:overlay)&anchor.size;
+    final country=engine.providerCountry;
+    await openSupportMenu(context,engine,()=>showMenu<SupportAction>(context:context,
+      position:RelativeRect.fromRect(rect,Offset.zero&overlay.size),
+      items:supportMenuItems(engine,includeSettings:true)),history:widget.history);
+    if(mounted){setState((){});if(country!=engine.providerCountry)unawaited(loadDirectory(refresh:true));}
+  }
   Widget chips(List<String> labels,String selected,ValueChanged<String> onChanged)=>SingleChildScrollView(scrollDirection:Axis.horizontal,
     padding:const EdgeInsets.symmetric(horizontal:16),child:Row(children:[
       for(final label in labels)Padding(padding:const EdgeInsets.only(right:6),child:ChoiceChip(label:Text(label),selected:label==selected,
@@ -405,7 +416,7 @@ class _MobileHomeState extends State<MobileHome>{
         const Expanded(child:Text.rich(TextSpan(style:TextStyle(fontSize:26,fontWeight:FontWeight.w800,letterSpacing:-1),children:[
           TextSpan(text:'isme'),TextSpan(text:'.',style:TextStyle(color:CinemaColors.accent)),TextSpan(text:'gg'),
         ]))),
-        IconButton(tooltip:'Menu',onPressed:settings,icon:const Icon(Icons.more_vert)),
+        IconButton(key:menuAnchor,tooltip:'Menu',onPressed:settings,icon:const Icon(Icons.more_vert)),
       ])),
       Expanded(child:PageStorage(bucket:pageStorage,child:KeyedSubtree(key:ValueKey('$tab:$category:${platform.key}'),child:page))),
     ]);

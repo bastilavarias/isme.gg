@@ -46,6 +46,14 @@ public final class MainActivity extends FlutterActivity {
                         case "open":
                             result.success(library.open(call.argument("bookmarks"), call.argument("history")));
                             break;
+                        case "clearCatalogCache":
+                            database.getWritableDatabase().delete("entries", null, null);
+                            result.success(null);
+                            break;
+                        case "clearHistory":
+                            database.getWritableDatabase().delete("watch_history", null, null);
+                            result.success(null);
+                            break;
                         case "readBookmarks":
                             result.success(library.readBookmarks());
                             break;

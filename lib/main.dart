@@ -18,6 +18,7 @@ import 'back_navigation.dart';
 import 'next_episode.dart';
 import 'bookmark_button.dart';
 import 'my_list.dart';
+import 'app_preferences.dart';
 
 void main(){ WidgetsFlutterBinding.ensureInitialized(); PaintingBinding.instance.imageCache.maximumSizeBytes=48*1024*1024; PaintingBinding.instance.imageCache.maximumSize=120; runApp(const IsmeApp()); }
 class IsmeApp extends StatefulWidget {
@@ -26,13 +27,21 @@ class IsmeApp extends StatefulWidget {
 }
 class _IsmeAppState extends State<IsmeApp> {
   NativeEngine? engine; History? history; String? error;
-  @override void initState(){super.initState();boot();}
+  @override void initState(){super.initState();HardwareKeyboard.instance.addHandler(_navigationSound);boot();}
+  bool _navigationSound(KeyEvent event){
+    final h=history;
+    if(engine?.tv==true&&h!=null&&AppPreferences.sounds(h.prefs)&&event is KeyDownEvent&&
+      const [LogicalKeyboardKey.arrowLeft,LogicalKeyboardKey.arrowRight,LogicalKeyboardKey.arrowUp,LogicalKeyboardKey.arrowDown].contains(event.logicalKey)){
+      unawaited(SystemSound.play(SystemSoundType.click).catchError((Object _){}));
+    }
+    return false;
+  }
   Future<void> boot() async {
     final e=NativeEngine();
-    try {await e.connect(); await e.restoreMetadataCredential(); final h=await History.open(await SharedPreferences.getInstance());final country=h.prefs.getString('isme-provider-country')??'PH';if(RegExp(r'^[A-Z]{2}$').hasMatch(country))e.providerCountry=country;if(!mounted){e.dispose();return;}setState((){engine=e;history=h;error=null;});}
+    try {await e.connect(); await e.restoreMetadataCredential(); final h=await History.open(await SharedPreferences.getInstance());final country=AppPreferences.region(h.prefs);if(RegExp(r'^[A-Z]{2}$').hasMatch(country))e.providerCountry=country;if(!mounted){e.dispose();return;}setState((){engine=e;history=h;error=null;});}
     catch(err){e.dispose();if(mounted)setState(()=>error=err.toString());}
   }
-  @override void dispose(){engine?.dispose();super.dispose();}
+  @override void dispose(){HardwareKeyboard.instance.removeHandler(_navigationSound);engine?.dispose();super.dispose();}
   @override Widget build(BuildContext context)=>MaterialApp(debugShowCheckedModeBanner:false,theme:cinemaTheme(),title:'isme.gg',
     home:engine==null?Scaffold(body:Center(child:Column(mainAxisSize:MainAxisSize.min,children:[
       const Wordmark(size:48),const SizedBox(height:24),
@@ -431,11 +440,12 @@ class _CinemaHomeState extends State<CinemaHome> {
     if(anchor is! RenderBox||overlay is! RenderBox)return;
     final origin=anchor.localToGlobal(Offset.zero,ancestor:overlay);
     final rect=origin & anchor.size;
+    final country=engine.providerCountry;
     await openSupportMenu(context,engine,()=>showMenu<SupportAction>(context:context,
       position:RelativeRect.fromRect(rect,Offset.zero & overlay.size),
       constraints:const BoxConstraints(minWidth:270,maxWidth:340),
-      items:supportMenuItems(engine)));
-    if(mounted)menuNav.requestFocus();
+      items:supportMenuItems(engine,includeSettings:true)),history:widget.history);
+    if(mounted){setState((){});menuNav.requestFocus();if(country!=engine.providerCountry)unawaited(loadPlatforms(force:true));}
   }
   Widget navDivider()=>Padding(
     padding:EdgeInsets.symmetric(horizontal:engine.tv?9:5),

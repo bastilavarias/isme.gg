@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'playback_recovery.dart';
 import 'player_preferences.dart';
+import 'app_preferences.dart';
 import 'next_episode.dart';
 import 'back_navigation.dart';
 import 'package:flutter/material.dart';
@@ -66,7 +67,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   DateTime? _lastNextFailure;
   Future<void> _prepOps=Future.value();
   bool get _episodic=>_movie.isEpisode&&widget.magnet.isEmpty;
-  bool get _autoplay=>widget.history.prefs.getBool('isme-autoplay-next')??true;
+  bool get _autoplay=>AppPreferences.autoplay(widget.history.prefs);
   bool get _showNext=>_next!=null&&_nearEnd&&!_nextDismissed&&!_transitioning&&!busy&&!leaving;
   void _queuePreparation(Movie current,Movie next,int n){
     if(_prepareRequested)return;
@@ -211,8 +212,8 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   FocusNode? lastControl, lastBottom;
   List<FocusNode> get bottomNodes=>[rewindFocus,playFocus,forwardFocus,ccFocus,audioFocus,if(sources.length>1)sourceFocus,if(_showNext)...[_nextFocus,_creditsFocus]];
   List<FocusNode> get topNodes=>[backFocus,if(kDebugMode)debugFocus];
-  int get subtitleSize=>(widget.history.prefs.getInt('isme-subtitle-size')??1).clamp(0,3).toInt();
-  static const subtitleSizes=['Small','Medium','Large','Extra large'];
+  int get subtitleSize=>AppPreferences.size(widget.history.prefs);
+  static const subtitleSizes=AppPreferences.sizes;
   double get captionFontSize=>(widget.engine.tv?24.0:17.0)*[.8,1.0,1.25,1.5][subtitleSize];
   Duration get motion=>MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:220);
   String get loadingCaption {
@@ -257,7 +258,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     }
     return true;
   }
-  String get subtitleLanguage=>widget.history.prefs.getString('isme-subtitle-language')??'eng';
+  String get subtitleLanguage=>AppPreferences.subtitles(widget.history.prefs);
   @override void initState(){
     super.initState();WidgetsBinding.instance.addObserver(this);
     unawaited(widget.engine.setPlaybackActive(true));
@@ -516,7 +517,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   bool _screenOn=false;
   void syncPlaybackScreen(bool active){
-    final next=active&&_foreground&&!closed;
+    final next=active&&_foreground&&!closed&&AppPreferences.awake(widget.history.prefs);
     if(next==_screenOn)return;
     _screenOn=next;
     unawaited(widget.engine.setPlaybackScreenOn(next));
@@ -608,7 +609,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         await c.setClosedCaptionFile(null);
         if(samePlayer(c,n)&&revision==subtitleRevision){
           setState(()=>captionId=null);
-          await widget.history.prefs.setString('isme-subtitle-language','off');
+          await widget.history.prefs.setString(AppPreferences.subtitleLanguageKey,'off');
         }
       }else{
         final raw=await widget.engine.caption(id);
@@ -616,7 +617,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         await c.setClosedCaptionFile(Future.value(WebVTTCaptionFile(raw)));
         if(samePlayer(c,n)&&revision==subtitleRevision){
           setState(()=>captionId=id);
-          await widget.history.prefs.setString('isme-subtitle-language',choice['lang']?.toString()??'eng');
+          await widget.history.prefs.setString(AppPreferences.subtitleLanguageKey,AppPreferences.language(choice['lang']?.toString()));
         }
       }
     }catch(_){if(samePlayer(c,n))notice('Subtitles unavailable.');}
@@ -629,7 +630,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
           child:Text(subtitleSizes[i]+(i==subtitleSize?' (selected)':''),style:TextStyle(fontSize:16.0+i*3))),
     ]));
     if(value==null||!mounted||closed)return;
-    await widget.history.prefs.setInt('isme-subtitle-size',value);
+    await widget.history.prefs.setInt(AppPreferences.subtitleSizeKey,value);
     if(mounted&&!closed)setState((){});
   }
   Future<void> applyAudioPreference(VideoPlayerController c,int n) async{

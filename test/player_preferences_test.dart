@@ -17,6 +17,9 @@ void main() {
     expect(subtitleCandidates(subtitles, 'off'), isEmpty);
     expect(subtitleCandidates([], 'eng'), isEmpty);
   });
+  test('Filipino preference recognizes Tagalog language aliases', () {
+    expect(subtitleCandidates([{'id': 1, 'lang': 'eng'}, {'id': 2, 'lang': 'tgl'}], 'fil').first['id'], 2);
+  });
   test('recommend AAC stereo only in the selected language', () {
     const surround = VideoAudioTrack(id: 'surround', isSelected: true,
         language: 'en', codec: 'ac3', channelCount: 6);

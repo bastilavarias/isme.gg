@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'design.dart';
 import 'engine.dart';
+import 'settings_page.dart';
 
 const reportIssueUrl='https://github.com/bastilavarias/isme.gg/issues/new';
-enum SupportAction { report, clear, update }
+enum SupportAction { settings, report, clear, update }
 
 String installedVersion(NativeEngine engine)=>engine.appVersion.isEmpty?'—':'v${engine.appVersion}';
 
@@ -14,7 +15,8 @@ Widget _menuLabel(String label,IconData icon,{String? trailing})=>Row(children:[
   if(trailing!=null)...[const SizedBox(width:12),Text(trailing,style:const TextStyle(fontSize:12,color:CinemaColors.muted))],
 ]);
 
-List<PopupMenuEntry<SupportAction>> supportMenuItems(NativeEngine engine)=>[
+List<PopupMenuEntry<SupportAction>> supportMenuItems(NativeEngine engine,{bool includeSettings=false})=>[
+  if(includeSettings)PopupMenuItem(value:SupportAction.settings,child:_menuLabel('Settings',Icons.settings_outlined)),
   PopupMenuItem(value:SupportAction.report,child:_menuLabel('Report a problem',Icons.report_problem_outlined)),
   PopupMenuItem(value:SupportAction.clear,child:_menuLabel('Clear local data',Icons.delete_outline)),
   const PopupMenuDivider(),
@@ -35,14 +37,17 @@ Future<SupportAction?> showSupportSheet(BuildContext context,NativeEngine engine
     ]))));
 
 /// Keep automatic update prompts out of the menu and confirmation dialogs.
-Future<void> openSupportMenu(BuildContext context,NativeEngine engine,Future<SupportAction?> Function() choose) async {
+Future<void> openSupportMenu(BuildContext context,NativeEngine engine,Future<SupportAction?> Function() choose,{History? history}) async {
   SupportAction? action;
   await engine.setSupportUiActive(true);
   try{
     if(!context.mounted)return;
     action=await choose();
     if(!context.mounted)return;
-    if(action==SupportAction.report){
+    if(action==SupportAction.settings&&history!=null){
+      final update=await Navigator.of(context).push<bool>(MaterialPageRoute(builder:(_)=>SettingsPage(engine:engine,history:history)));
+      if(update==true)action=SupportAction.update;
+    }else if(action==SupportAction.report){
       await showReportProblem(context,engine);
     }else if(action==SupportAction.clear){
       await confirmClearLocalData(context,engine);
@@ -117,7 +122,7 @@ Future<void> confirmClearLocalData(BuildContext context,NativeEngine engine) asy
       title:const Text('Clear local data?'),
       scrollable:true,
       content:const SizedBox(width:340,child:Text(
-        'Permanently remove watch history, playback progress, cached files, saved credentials and preferences on this device. '
+        'Permanently remove My List, watch history, playback progress, cached files, saved credentials and preferences on this device. '
         'The app will close and you can reopen it with default settings. This cannot be undone.')),
       actions:[
         TextButton(autofocus:true,onPressed:()=>Navigator.pop(ctx,false),child:const Text('Cancel')),

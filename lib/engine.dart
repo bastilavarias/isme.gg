@@ -274,6 +274,10 @@ class NativeEngine {
     try{await channel.invokeMethod<void>('setSupportUiActive',{'active':active});}catch(_){}
   }
   Future<void> openIssueReport()=>channel.invokeMethod<void>('openIssueReport');
+  Future<void> clearCatalogCache() async {
+    await SqliteLibraryPersistence.channel.invokeMethod<void>('clearCatalogCache');
+    _providerMemo.clear();providerRevision.value++;
+  }
   Future<bool> clearLocalData() async=>await channel.invokeMethod<bool>('clearLocalData')??false;
   Future<void> setPlaybackScreenOn(bool active) async {
     try{await channel.invokeMethod<void>('setPlaybackScreenOn',{'active':active});}catch(_){}
@@ -290,6 +294,7 @@ abstract class LibraryPersistence {
   Future<List<Map<String,dynamic>>> readBookmarks();
   Future<void> writeBookmark(String id,Map<String,dynamic>? row);
   Future<void> writeHistory(String id,Map<String,dynamic>? row);
+  Future<void> clearHistory();
 }
 class SqliteLibraryPersistence implements LibraryPersistence {
   static const channel=MethodChannel('gg.isme/library');
@@ -305,6 +310,7 @@ class SqliteLibraryPersistence implements LibraryPersistence {
   }
   @override Future<void> writeBookmark(String id,Map<String,dynamic>? row)=>channel.invokeMethod<void>(
     'bookmark',{'id':id,'payload':row==null?null:jsonEncode(row)});
+  @override Future<void> clearHistory()=>channel.invokeMethod<void>('clearHistory');
   @override Future<void> writeHistory(String id,Map<String,dynamic>? row)=>channel.invokeMethod<void>(
     'history',{'id':id,'payload':row==null?null:jsonEncode(row)});
 }
@@ -332,6 +338,7 @@ class MemoryLibraryPersistence implements LibraryPersistence {
   @override Future<void> writeBookmark(String id,Map<String,dynamic>? row) async{
     if(row==null){bookmarks.remove(id);}else{bookmarks[id]=row;}
   }
+  @override Future<void> clearHistory() async{history.clear();}
   @override Future<void> writeHistory(String id,Map<String,dynamic>? row) async{
     if(row==null){history.remove(id);}else{history[id]=row;}
     final sorted=history.values.toList()..sort((a,b)=>(b['updated'] as int).compareTo(a['updated'] as int));
@@ -401,6 +408,11 @@ class History {
   double? fraction(Movie m){
     final row=_data[m.id],time=row?['time'],duration=row?['duration'];
     return time is num&&duration is num&&duration>0?(time/duration).clamp(0.0,1.0).toDouble():null;
+  }
+  Future<void> clear() {
+    final job=_queue.then((_)async{await _storage.clearHistory();_data.clear();await prefs.remove('watch-v1');});
+    _queue=job.then<void>((_){},onError:(Object _,StackTrace __){});
+    return job;
   }
   Future<void> save(Movie m, Duration position, Duration duration) {
     final seconds=position.inSeconds;

@@ -1,4 +1,5 @@
 import 'package:video_player/video_player.dart';
+import 'app_preferences.dart';
 
 /// Match the original cinema player's language preference and explicit Off.
 List<Map<String,dynamic>> subtitleCandidates(List<Map<String,dynamic>> tracks, String language) {
@@ -6,8 +7,8 @@ List<Map<String,dynamic>> subtitleCandidates(List<Map<String,dynamic>> tracks, S
   final ordered = <Map<String,dynamic>>[];
   final seen = <int>{};
   for (final group in [
-    tracks.where((t) => t['lang'] == language),
-    tracks.where((t) => t['lang'] == 'eng' || t['lang'] == 'en'),
+    tracks.where((t) => AppPreferences.languageAliases[t['lang']?.toString().toLowerCase()] == language),
+    tracks.where((t) => AppPreferences.languageAliases[t['lang']?.toString().toLowerCase()] == 'eng'),
     tracks,
   ]) {
     for (final track in group) {
