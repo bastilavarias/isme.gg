@@ -33,6 +33,24 @@ void main(){
     expect(reopened.movies(),isEmpty);
     expect(reopened.bookmarks.contains(movie),isTrue);
   });
+  testWidgets('settings values and switches align to the same trailing edge',(tester)async{
+    SharedPreferences.setMockInitialValues({});
+    final history=History.inMemory(await SharedPreferences.getInstance()),engine=NativeEngine();
+    addTearDown(engine.dispose);
+    tester.view.physicalSize=const Size(400,900);
+    tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:SettingsPage(engine:engine,history:history)));
+    final right=tester.getRect(find.byType(Switch).first).right;
+    expect(right,greaterThan(360));
+    for(final value in ['English','Medium','Philippines']){
+      await tester.ensureVisible(find.text(value));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(find.text(value)).right,closeTo(right,1));
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
   testWidgets('settings opens from menu and persists playback toggle',(tester)async{
     SharedPreferences.setMockInitialValues({});
     final prefs=await SharedPreferences.getInstance();

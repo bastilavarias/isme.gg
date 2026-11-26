@@ -133,10 +133,16 @@ class _SettingsRowState extends State<_SettingsRow>{
         padding:const EdgeInsets.symmetric(horizontal:16,vertical:12),
         decoration:BoxDecoration(color:focused?CinemaColors.panel:Colors.transparent,borderRadius:BorderRadius.circular(10),
           border:Border.all(color:focused?CinemaColors.accent:Colors.transparent,width:2)),
-        child:Row(children:[Icon(widget.icon,color:widget.danger?Colors.redAccent:CinemaColors.muted),const SizedBox(width:16),
+        child:Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[Icon(widget.icon,color:widget.danger?Colors.redAccent:CinemaColors.muted),const SizedBox(width:16),
           Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
             Text(widget.title,style:TextStyle(fontWeight:FontWeight.w600,color:widget.danger?Colors.redAccent:CinemaColors.ink)),
             if(widget.subtitle!=null)Text(widget.subtitle!,style:const TextStyle(color:CinemaColors.muted,fontSize:12)),
-          ])),const SizedBox(width:8),if(widget.trailing!=null)Flexible(child:widget.trailing!)else const Icon(Icons.chevron_right,color:CinemaColors.muted),
+          ])),const SizedBox(width:12),
+          // Let the label occupy remaining space; trailing controls keep their
+          // intrinsic width and share the same right edge on every row.
+          if(widget.trailing!=null)ConstrainedBox(constraints:const BoxConstraints(maxWidth:140),
+            child:Align(alignment:Alignment.centerRight,widthFactor:1,
+              child:DefaultTextStyle.merge(textAlign:TextAlign.end,child:widget.trailing!)))
+          else const Icon(Icons.chevron_right,color:CinemaColors.muted),
         ])))));
 }
