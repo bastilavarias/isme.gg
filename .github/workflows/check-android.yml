@@ -1,0 +1,71 @@
+name: Android development checks
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'lib/**'
+      - 'test/**'
+      - 'tools/**'
+      - 'pubspec.*'
+      - 'analysis_options.yaml'
+      - 'toolchain.json'
+      - 'setupwindows.bat'
+      - '.github/workflows/check-android.yml'
+      - '.github/workflows/release-android.yml'
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read shared toolchain
+        id: toolchain
+        run: python tools/check_toolchain.py --github-output
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ steps.toolchain.outputs.java }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.toolchain.outputs.flutter }}
+          channel: stable
+      - name: Install shared Android SDK packages
+        shell: powershell
+        run: |
+          & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" "platforms;android-${{ steps.toolchain.outputs.androidSdk }}" "build-tools;${{ steps.toolchain.outputs.androidBuildTools }}"
+          if ($LASTEXITCODE -ne 0) { throw 'SDK installation failed.' }
+      - name: Run actual Windows launcher without emulators
+        shell: powershell
+        run: |
+          & .\tools\setup-windows.ps1 -SkipPull -BuildOnly -JdkDir "$env:JAVA_HOME"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Analyze and test
+        run: |
+          flutter analyze --no-pub --no-fatal-infos
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          flutter test --no-pub
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B -m unittest discover -s tools -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify no tracked file was rewritten
+        if: always()
+        run: python tools/check_toolchain.py --clean
+      - name: Preserve resolved dependency lockfile for review
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: reviewed-dependency-lockfile
+          path: pubspec.lock
+          if-no-files-found: error
+          retention-days: 7

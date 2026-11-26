@@ -1,0 +1,9 @@
+{
+  "flutter": "3.38.10",
+  "java": "21",
+  "gradle": "8.13",
+  "androidGradlePlugin": "8.13.1",
+  "kotlin": "2.2.21",
+  "androidSdk": 36,
+  "androidBuildTools": "36.0.0"
+}

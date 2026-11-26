@@ -1,8 +1,9 @@
+param([string]$Flutter = "flutter.bat")
 $ErrorActionPreference = "Stop"
 $project = Split-Path -Parent $PSScriptRoot
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("ismegg-wrapper-" + [guid]::NewGuid().ToString("N"))
 try {
-  flutter create --platforms=android --project-name ismegg --org gg.isme $temp
+  & $Flutter create --no-pub --platforms=android --project-name ismegg --org gg.isme $temp
   if ($LASTEXITCODE -ne 0) { throw "Flutter scaffold failed." }
   $android = Join-Path $temp "android"
   $dest = Join-Path $project "android"

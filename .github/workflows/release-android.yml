@@ -26,14 +26,19 @@ jobs:
     environment: android-signing
     steps:
       - uses: actions/checkout@v4
+      - name: Read shared toolchain
+        id: toolchain
+        run: python3 tools/check_toolchain.py --github-output
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: ${{ steps.toolchain.outputs.java }}
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.10'
+          flutter-version: ${{ steps.toolchain.outputs.flutter }}
           channel: stable
+      - name: Verify Flutter version
+        run: python3 tools/check_toolchain.py --check-flutter
       - name: Validate inputs
         env:
           VERSION: ${{ inputs.version }}
@@ -42,19 +47,22 @@ jobs:
           python3 -c 'import os,re; v=os.environ["VERSION"]; c=os.environ["CODE"]; assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",v); assert re.fullmatch(r"[1-9][0-9]*",c) and int(c)<=2100000000'
       - name: Prepare build
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-${{ steps.toolchain.outputs.androidSdk }}" "build-tools;${{ steps.toolchain.outputs.androidBuildTools }}"
           scaffold="$(mktemp -d)"
-          flutter create --platforms=android --project-name ismegg --org gg.isme "$scaffold"
+          trap 'rm -rf "$scaffold"' EXIT
+          flutter create --no-pub --platforms=android --project-name ismegg --org gg.isme "$scaffold"
           cp "$scaffold/android/gradlew" android/
           cp "$scaffold/android/gradle/wrapper/gradle-wrapper.jar" android/gradle/wrapper/
           chmod +x android/gradlew
           dart tools/prepare_fonts.dart
-          flutter pub get
+          if git ls-files --error-unmatch pubspec.lock >/dev/null 2>&1; then flutter pub get --enforce-lockfile; else flutter pub get; fi
+          python3 tools/check_toolchain.py --clean
       - name: Regression tests
         run: |
-          flutter analyze --no-fatal-infos
-          flutter test
-          python3 -B -m unittest discover -s tools -p 'test_release_metadata.py'
+          flutter analyze --no-pub --no-fatal-infos
+          flutter test --no-pub
+          python3 -B -m unittest discover -s tools -p 'test_*.py'
+          python3 tools/check_toolchain.py --clean
       - name: Build signed ARM APK and verify
         env:
           KEYSTORE_BASE64: ${{ secrets.ISME_KEYSTORE_BASE64 }}
@@ -79,8 +87,9 @@ jobs:
           test -n "$KEYSTORE_BASE64"
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$ISME_KEYSTORE_PATH"
           unset KEYSTORE_BASE64
-          flutter build apk --release --target-platform android-arm,android-arm64 --build-name "$VERSION" --build-number "$CODE"
-          python3 tools/release_metadata.py --apk build/app/outputs/flutter-apk/app-release.apk --output "$RUNNER_TEMP/release" --version "$VERSION" --code "$CODE" --aapt2 "$ANDROID_HOME/build-tools/36.0.0/aapt2" --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" --signer "$SIGNER_SHA256"
+          flutter build apk --release --no-pub --target-platform android-arm,android-arm64 --build-name "$VERSION" --build-number "$CODE"
+          python3 tools/check_toolchain.py --clean
+          python3 tools/release_metadata.py --apk build/app/outputs/flutter-apk/app-release.apk --output "$RUNNER_TEMP/release" --version "$VERSION" --code "$CODE" --aapt2 "$ANDROID_HOME/build-tools/${{ steps.toolchain.outputs.androidBuildTools }}/aapt2" --apksigner "$ANDROID_HOME/build-tools/${{ steps.toolchain.outputs.androidBuildTools }}/apksigner" --signer "$SIGNER_SHA256"
       - uses: actions/upload-artifact@v4
         with:
           name: isme-android-release
