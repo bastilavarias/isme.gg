@@ -41,11 +41,13 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B -m unittest discover -s tools -p 'test_*website*.py'
-          mkdir -p site/assets/{screenshots,fonts}
+          mkdir -p site/assets/{screenshots,fonts,posters,platforms}
           cp web/index.html web/robots.txt web/sitemap.xml web/llms.txt site/
-          cp web/assets/{hero.js,releases.js} site/assets/
+          cp web/assets/{hero.js,releases.js,tmdb.svg} site/assets/
           cp web/assets/fonts/{nunito-latin.woff2,OFL.txt} site/assets/fonts/
           cp web/assets/screenshots/{tv-hero.gif,tv-hero.webm,tv-hero.mp4,tv-hero-poster.webp,tv-home.png,tv-showcase.png,mobile-home.png,mobile-details.png,player-showcase.png} site/assets/screenshots/
+          cp web/assets/posters/{movies,series,anime,pinoy,kdrama}.webp site/assets/posters/
+          cp web/assets/platforms/{netflix,disney-plus,prime-video,hbo-max,apple-tv,crunchyroll,hulu,viu}.webp site/assets/platforms/
           python3 tools/website_releases.py --output site/assets/releases.json
           python3 tools/check_website.py site
       - uses: actions/upload-pages-artifact@v3

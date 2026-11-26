@@ -42,10 +42,6 @@ Start with [DEVELOPMENT.md](DEVELOPMENT.md) for the pinned Android and Flutter t
 
 ## Preview credits
 
-The screenshots and demo show the running app with a curated Blender open-movie catalog.
+The browsing captures show isme.gg's Android and Android TV catalogs. The [website](https://bastilavarias.github.io/isme.gg/) uses posters from [TMDB](https://www.themoviedb.org/) and streaming platform data and logos from JustWatch via TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB. The TMDB logo is by Travis Bell and used unmodified under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). [Logo source](https://commons.wikimedia.org/wiki/File:Tmdb.new.logo.svg).
 
-- **Big Buck Bunny** © 2008 Blender Foundation / www.bigbuckbunny.org. [CC BY 3.0](https://peach.blender.org/about/).
-- **Sintel** © Blender Foundation / www.sintel.org. [CC BY 3.0](https://durian.blender.org/sharing/).
-- **Elephants Dream** © 2006 Blender Foundation / Netherlands Media Art Institute / www.elephantsdream.org. [CC BY 2.5](https://orange.blender.org/blog/creative-commons-license-2/).
-- **Caminandes** © Blender Foundation. [Creative Commons Attribution](https://studio.blender.org/remixing/).
-- **Spring** and **Tears of Steel** © Blender Foundation. [Creative Commons Attribution](https://studio.blender.org/remixing/).
+The player screenshot features **Big Buck Bunny** © 2008 Blender Foundation / www.bigbuckbunny.org. [CC BY 3.0](https://peach.blender.org/about/).
