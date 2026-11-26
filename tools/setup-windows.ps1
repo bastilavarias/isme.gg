@@ -35,20 +35,44 @@ function Find-Tool {
     throw "$Name not found. Install it or add it to your Windows PATH."
 }
 
-# Never print file contents, reset changes, or silently build a dirty checkout.
-function Assert-CleanTracked {
-    param([string]$Git, [string]$Stage)
-    $changes = @(& $Git status --porcelain=v1 --untracked-files=no)
-    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect Git status.' }
-    if ($changes.Count -gt 0) {
-        Write-Host "Tracked changes at $Stage (preserved):" -ForegroundColor Yellow
+function Get-TrackedState {
+    param([string]$Git, [string[]]$Paths)
+    # NUL-delimited entries preserve spaces and Unicode paths. Hash on-disk bytes
+    # so changes to an already modified file are detected as well.
+    $encoding = [Console]::OutputEncoding
+    try {
+        [Console]::OutputEncoding = [Text.Encoding]::UTF8
+        $entries = (& $Git ls-files --stage -z -- @Paths) -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw 'Could not read the Git index.' }
+    } finally {
+        [Console]::OutputEncoding = $encoding
+    }
+    $state = @{}
+    foreach ($entry in ($entries -split "`0" | Where-Object { $_ })) {
+        $index, $path = $entry -split "`t", 2
+        if (-not $index.EndsWith(' 0')) { throw "Resolve the Git conflict in $path before building." }
+        $hash = if (Test-Path -LiteralPath $path -PathType Leaf) {
+            (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        }
+        $state[$path] = "$index|$hash"
+    }
+    return $state
+}
+
+function Assert-TrackedState {
+    param([string]$Git, [hashtable]$Before, [string]$Stage, [string[]]$Paths)
+    $after = Get-TrackedState $Git $Paths
+    $changes = @(($Before.Keys + $after.Keys) | Sort-Object -Unique |
+        Where-Object { $Before[$_] -cne $after[$_] })
+    if ($changes.Count) {
+        Write-Host "Tracked files changed at ${Stage} (changes preserved):" -ForegroundColor Yellow
         $changes | Write-Host
-        throw "Checkout is not clean at $Stage. Resolve these changes once in the original checkout. Do not reset or stash blindly. Machine settings belong in ignored files."
+        throw "Tracked file verification failed at $Stage."
     }
 }
 
 function Find-PinnedFlutter {
-    param([string]$Explicit, [string]$Version, [string[]]$Candidates)
+    param([string]$Explicit, [string]$Version, [string]$DartVersion, [string[]]$Candidates)
     $paths = @()
     if ($Explicit) {
         $paths += (Join-Path $Explicit 'bin\flutter.bat')
@@ -66,15 +90,15 @@ function Find-PinnedFlutter {
             $raw = @(& $candidate --version --machine)
             if ($LASTEXITCODE -ne 0) { continue }
             $info = ($raw -join "`n") | ConvertFrom-Json
-            if ($info.frameworkVersion -eq $Version) {
+            if ($info.frameworkVersion -eq $Version -and $info.dartSdkVersion -eq $DartVersion) {
                 return (Resolve-Path -LiteralPath $candidate).Path
             }
-            Write-Host "Skipping Flutter $($info.frameworkVersion); project requires $Version." -ForegroundColor Yellow
+            Write-Host "Skipping Flutter $($info.frameworkVersion) / Dart $($info.dartSdkVersion); project requires $Version / $DartVersion." -ForegroundColor Yellow
         } catch {
             Write-Host "Could not inspect Flutter SDK at $candidate." -ForegroundColor Yellow
         }
     }
-    throw "Flutter $Version is required. Install that exact SDK from https://docs.flutter.dev/install/archive and pass -FlutterDir C:\path\to\flutter or set ISME_FLUTTER_DIR. The launcher will not migrate tracked Gradle files to a different SDK."
+    throw "Flutter $Version with Dart $DartVersion is required. Add it to PATH, set ISME_FLUTTER_DIR, or pass -FlutterDir."
 }
 
 function Find-CompatibleJdk {
@@ -193,37 +217,102 @@ function Start-SelectedAvd {
     return $serial
 }
 
-# The multi-device Flutter runner shares one interactive console.
-# Refuse other connected Android/custom devices rather than installing blindly.
-function Assert-BothTargets {
-    param([string]$Adb, [string]$Flutter, [string[]]$Expected)
-    foreach ($folder in @('windows','linux','macos','ios')) {
-        if ((Test-Path (Join-Path $folder 'CMakeLists.txt')) -or
-            (Test-Path (Join-Path $folder 'Runner.xcodeproj'))) {
-            throw 'Both mode requires the Android-only Flutter project. Use individual device runs.'
+function Send-FlutterCommand {
+    param($Session, [string]$Method, [hashtable]$Parameters)
+    $Session.RequestId++
+    $Parameters.appId = $Session.AppId
+    $request = @{ id = $Session.RequestId; method = $Method; params = $Parameters } | ConvertTo-Json -Compress
+    $Session.Process.StandardInput.WriteLine("[$request]")
+    $Session.Process.StandardInput.Flush()
+}
+
+# Flutter only accepts a prebuilt APK with a single explicit device. Use its
+# machine protocol to keep both device runs controlled by the same terminal.
+function Invoke-BothFlutterRuns {
+    param([string]$Flutter, [string[]]$Serials, [string]$Apk)
+    $sessions = @()
+    try {
+        foreach ($serial in $Serials) {
+            $start = New-Object System.Diagnostics.ProcessStartInfo
+            $start.FileName = $env:ComSpec
+            $start.Arguments = "/d /s /c `"`"%ISME_SESSION_FLUTTER%`" run --machine --debug --no-pub -d $serial --use-application-binary `"$Apk`"`""
+            $start.EnvironmentVariables['ISME_SESSION_FLUTTER'] = $Flutter
+            $start.UseShellExecute = $false
+            $start.CreateNoWindow = $true
+            $start.RedirectStandardInput = $true
+            $start.RedirectStandardOutput = $true
+            $start.StandardOutputEncoding = [Text.Encoding]::UTF8
+            $process = [Diagnostics.Process]::Start($start)
+            $sessions += [pscustomobject]@{
+                Serial = $serial
+                Process = $process
+                Line = $process.StandardOutput.ReadLineAsync()
+                AppId = $null
+                RequestId = 0
+                Started = $false
+            }
         }
-    }
-    $listed = @(& $Adb devices)
-    if ($LASTEXITCODE -ne 0) { throw 'Could not list ADB devices.' }
-    $connected = @()
-    foreach ($line in $listed) {
-        if ($line -match '^(\S+)\s+device\s*$') { $connected += $Matches[1] }
-    }
-    $unexpected = @($connected | Where-Object { $_ -notin $Expected })
-    $missing = @($Expected | Where-Object { $_ -notin $connected })
-    if ($unexpected.Count -or $missing.Count) {
-        throw "Both mode needs exactly the selected Android devices. Disconnect other devices ($($unexpected -join ', ')) or reconnect missing devices ($($missing -join ', '))."
-    }
-    $json = (& $Flutter devices --machine) -join "`n"
-    if ($LASTEXITCODE -ne 0) { throw 'Could not verify Flutter device targets.' }
-    $devices = ConvertFrom-Json -InputObject $json
-    $other = @($devices | Where-Object {
-        $_.id -notin $Expected -and $_.isSupported -ne $false -and
-        $_.targetPlatform -notmatch '^(web-|windows-|linux-|darwin-|macos-|fuchsia-)'
-    })
-    $missingFlutter = @($Expected | Where-Object { $_ -notin $devices.id })
-    if ($other.Count -or $missingFlutter.Count) {
-        throw "Flutter target verification failed. Other targets: $($other.id -join ', '); missing: $($missingFlutter -join ', '). Use individual device commands if needed."
+
+        while ($true) {
+            foreach ($session in $sessions) {
+                if (-not $session.Line.IsCompleted) { continue }
+                $line = $session.Line.GetAwaiter().GetResult()
+                if ($null -eq $line) {
+                    $session.Process.WaitForExit()
+                    throw "Flutter stopped on $($session.Serial) (exit code $($session.Process.ExitCode))."
+                }
+                $session.Line = $session.Process.StandardOutput.ReadLineAsync()
+                if ($line -notmatch '^\[\{') {
+                    if ($line) { Write-Host "[$($session.Serial)] $line" }
+                    continue
+                }
+                foreach ($message in (ConvertFrom-Json -InputObject $line)) {
+                    switch ($message.event) {
+                        'app.start' { $session.AppId = $message.params.appId }
+                        'app.started' {
+                            $session.Started = $true
+                            Write-Host "Flutter ready on $($session.Serial)." -ForegroundColor Green
+                        }
+                        'app.log' { Write-Host "[$($session.Serial)] $($message.params.log)" }
+                        'app.progress' {
+                            if ($message.params.message) {
+                                Write-Host "[$($session.Serial)] $($message.params.message)"
+                            }
+                        }
+                        'daemon.logMessage' { Write-Host "[$($session.Serial)] $($message.params.message)" }
+                    }
+                    if ($message.error) { Write-Host "[$($session.Serial)] $($message.error)" -ForegroundColor Yellow }
+                    if ($message.result.message) { Write-Host "[$($session.Serial)] $($message.result.message)" }
+                }
+            }
+
+            if (-not [Console]::IsInputRedirected -and [Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true).KeyChar
+                if ($key -ceq 'q') { break }
+                if ($key -in @('r', 'R')) {
+                    foreach ($session in ($sessions | Where-Object Started)) {
+                        Send-FlutterCommand $session 'app.restart' @{ fullRestart = ($key -ceq 'R'); pause = $false }
+                    }
+                }
+            }
+            Start-Sleep -Milliseconds 50
+        }
+    } finally {
+        foreach ($session in $sessions) {
+            if ($session.Process.HasExited) { continue }
+            try {
+                if ($session.AppId) { Send-FlutterCommand $session 'app.stop' @{} }
+                else { $session.Process.StandardInput.Close() }
+            } catch {
+                Write-Host "Flutter was already stopping on $($session.Serial)." -ForegroundColor Yellow
+            }
+        }
+        foreach ($session in $sessions) {
+            if (-not $session.Process.WaitForExit(10000)) {
+                & taskkill.exe /PID $session.Process.Id /T /F | Out-Null
+            }
+            $session.Process.Dispose()
+        }
     }
 }
 
@@ -241,23 +330,25 @@ try {
     Write-Host "Targets: $($targets -join ', ')"
     if ($CheckOnly -and $BuildOnly) { throw 'Choose either -CheckOnly or -BuildOnly.' }
     $git = Find-Tool 'git.exe'
-    Assert-CleanTracked $git 'startup'
-    if (-not $SkipPull) {
+    $localChanges = @(& $git status --porcelain=v1 --untracked-files=no)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect Git status.' }
+    $branch = & $git branch --show-current
+    if ($LASTEXITCODE -ne 0) { throw 'Could not determine the current Git branch.' }
+    if ($SkipPull -or $localChanges.Count -or $branch -ne 'main') {
+        Write-Host '[1/5] Using local code (automatic update requires a clean main checkout).'
+    } else {
         Write-Host '[1/5] Updating from GitHub...' -ForegroundColor Cyan
-        $branch = & $git branch --show-current
-        if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') {
-            throw 'Switch to the main branch before running this launcher.'
-        }
         $launcherPath = $PSCommandPath
         $before = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash
         Invoke-Checked $git @('fetch','origin','main')
-        # A testing checkout should never contain local-only commits.
         & $git merge-base --is-ancestor HEAD origin/main
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Local main is ahead of or diverged from origin/main. Reconcile existing commits once; nothing was reset.'
+        if ($LASTEXITCODE -eq 0) {
+            Invoke-Checked $git @('merge','--ff-only','origin/main')
+        } elseif ($LASTEXITCODE -eq 1) {
+            Write-Host 'Using local main because it has commits outside origin/main.' -ForegroundColor Yellow
+        } else {
+            throw 'Could not compare local main and origin/main.'
         }
-        Invoke-Checked $git @('merge','--ff-only','origin/main')
-        Assert-CleanTracked $git 'after Git update'
         Invoke-Checked $git @('log','-1','--oneline')
         $after = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash
         if ($before -ne $after) {
@@ -275,19 +366,27 @@ try {
             & powershell.exe @nextArgs
             exit $LASTEXITCODE
         }
-    } else {
-        Write-Host '[1/5] Using current local code (pull skipped).'
     }
+    $trackedBefore = Get-TrackedState $git
 
     $toolchain = Get-Content -LiteralPath 'toolchain.json' -Raw | ConvertFrom-Json
     $settings = Get-Content -LiteralPath 'android/settings.gradle' -Raw
     $wrapper = Get-Content -LiteralPath 'android/gradle/wrapper/gradle-wrapper.properties' -Raw
     $appGradle = Get-Content -LiteralPath 'android/app/build.gradle' -Raw
+    $gradleProperties = Get-Content -LiteralPath 'android/gradle.properties' -Raw
     if ($settings -notmatch ('id\s+"com\.android\.application"\s+version\s+"' + [regex]::Escape($toolchain.androidGradlePlugin) + '"') -or
         $settings -notmatch ('id\s+"org\.jetbrains\.kotlin\.android"\s+version\s+"' + [regex]::Escape($toolchain.kotlin) + '"') -or
         $wrapper -notmatch ('(?m)^distributionUrl=.*?/gradle-' + [regex]::Escape($toolchain.gradle) + '-(?:bin|all)\.zip\s*$') -or
-        $appGradle -notmatch ('(?m)^\s*compileSdk\s+' + $toolchain.androidSdk + '\s*$')) {
+        $appGradle -notmatch ('(?m)^\s*compileSdk\s+' + $toolchain.androidSdk + '\s*$') -or
+        $appGradle -notmatch ('(?m)^\s*buildToolsVersion\s+"' + [regex]::Escape($toolchain.androidBuildTools) + '"\s*$')) {
         throw 'Tracked Android Gradle settings differ from toolchain.json. Fix shared configuration in the repository, not on Windows.'
+    }
+    foreach ($property in @('android.newDsl', 'android.builtInKotlin')) {
+        $escaped = [regex]::Escape($property)
+        $definitions = [regex]::Matches($gradleProperties, "(?m)^[ \t]*$escaped(?=[ \t=:]).*")
+        if ($definitions.Count -ne 1 -or $definitions[0].Value.Trim() -cne "$property=false") {
+            throw "android/gradle.properties must set $property=false once before Flutter runs."
+        }
     }
     Write-Host '[2/5] Checking pinned Android and Flutter tools...' -ForegroundColor Cyan
     $sdkCandidates = @($env:ANDROID_SDK_ROOT, $env:ANDROID_HOME)
@@ -297,13 +396,9 @@ try {
     $env:ANDROID_HOME = $sdk
     $env:ANDROID_SDK_ROOT = $sdk
     $env:Path = "$(Join-Path $sdk 'platform-tools');$(Join-Path $sdk 'emulator');$env:Path"
-    $flutterCandidates = @('C:\flutter\bin\flutter.bat', 'C:\src\flutter\bin\flutter.bat')
-    if ($env:FLUTTER_ROOT) { $flutterCandidates += (Join-Path $env:FLUTTER_ROOT 'bin\flutter.bat') }
-    if ($env:USERPROFILE) {
-        $flutterCandidates += (Join-Path $env:USERPROFILE 'flutter\bin\flutter.bat')
-        $flutterCandidates += (Join-Path $env:USERPROFILE 'Documents\ChatGPT\isme.gg\dev-sdk\flutter\bin\flutter.bat')
-    }
-    $flutter = Find-PinnedFlutter $FlutterDir $toolchain.flutter $flutterCandidates
+    $flutterCandidates = @()
+    if ($env:USERPROFILE) { $flutterCandidates += (Join-Path $env:USERPROFILE 'flutter\bin\flutter.bat') }
+    $flutter = Find-PinnedFlutter $FlutterDir $toolchain.flutter $toolchain.dart $flutterCandidates
     $env:Path = "$(Split-Path -Parent $flutter);$env:Path"
     if (-not (Test-Path (Join-Path $sdk "platforms\android-$($toolchain.androidSdk)\android.jar"))) {
         throw "Android SDK Platform $($toolchain.androidSdk) is required. Install it in Android Studio > SDK Manager."
@@ -312,14 +407,14 @@ try {
         throw "Android SDK Build Tools $($toolchain.androidBuildTools) is required. Install it in Android Studio > SDK Manager."
     }
     $jdk = Find-CompatibleJdk $JdkDir $flutter $toolchain.java
-    Write-Host "Pinned Flutter: $($toolchain.flutter) ($flutter)" -ForegroundColor Green
+    Write-Host "Pinned Flutter $($toolchain.flutter) / Dart $($toolchain.dart) ($flutter)" -ForegroundColor Green
     $env:JAVA_HOME = $jdk
     $env:Path = "$(Join-Path $jdk 'bin');$env:Path"
     Write-Host "Using compatible Java SDK: $jdk" -ForegroundColor Green
     # Flutter otherwise prefers Android Studio's bundled runtime over JAVA_HOME.
     # This intentionally persists the JDK choice in this user's Flutter configuration.
     Invoke-Checked $flutter @('config', "--jdk-dir=$jdk")
-    Assert-CleanTracked $git 'after Flutter SDK configuration'
+    Assert-TrackedState $git $trackedBefore 'after Flutter SDK configuration'
     if ($CheckOnly) {
         Write-Host 'Toolchain and tracked checkout verified.' -ForegroundColor Green
         exit 0
@@ -362,7 +457,7 @@ try {
         New-Item -ItemType Directory -Force -Path 'android\.gradle' | Out-Null
         Set-Content -LiteralPath $wrapperStamp -Value $wrapperIdentity -Encoding ASCII
     }
-    Assert-CleanTracked $git 'after Gradle wrapper preparation'
+    Assert-TrackedState $git $trackedBefore 'after Gradle wrapper preparation'
     $dart = Join-Path (Split-Path -Parent $flutter) 'dart.bat'
     Invoke-Checked $dart @('tools/prepare_fonts.dart')
     if (Test-Path -LiteralPath 'pubspec.lock') {
@@ -371,32 +466,39 @@ try {
         if ($trackedLock.Count -gt 0) { Invoke-Checked $flutter @('pub','get','--enforce-lockfile') }
         else { Invoke-Checked $flutter @('pub','get') }
     } else { Invoke-Checked $flutter @('pub','get') }
-    Assert-CleanTracked $git 'after dependencies'
-    if ($BuildOnly) {
-        Write-Host '[5/5] Building debug APK without installing...' -ForegroundColor Cyan
+    Assert-TrackedState $git $trackedBefore 'after dependencies'
+    $debugApk = 'build/app/outputs/flutter-apk/app-debug.apk'
+    if ($BuildOnly -or $Both) {
+        # Flutter otherwise runs one Gradle build per device against the same
+        # project caches. Build once and let Flutter install the APK on both.
+        Write-Host '[5/5] Building the shared debug APK...' -ForegroundColor Cyan
         Invoke-Checked $flutter @('build','apk','--debug','--no-pub','--target-platform','android-arm,android-arm64,android-x64')
-        Assert-CleanTracked $git 'after debug build'
-        Write-Host 'Build complete; tracked checkout remains clean.' -ForegroundColor Green
+        Assert-TrackedState $git $trackedBefore 'after debug build'
+    }
+    if ($BuildOnly) {
+        Write-Host 'Build complete. The build preserved tracked files.' -ForegroundColor Green
         exit 0
     }
 
-    Write-Host '[5/5] Building, installing and launching isme.gg...' -ForegroundColor Cyan
+    # Guard build configuration while allowing Dart edits for hot reload.
+    $sessionPaths = @('android', 'analysis_options.yaml', 'pubspec.yaml', 'pubspec.lock', 'toolchain.json')
+    $trackedBefore = Get-TrackedState $git $sessionPaths
+    Write-Host '[5/5] Launching isme.gg with Flutter...' -ForegroundColor Cyan
     Write-Host 'Keep this window open for hot reload: r = reload, R = restart, q = quit.'
     if ($Both) {
-        Assert-BothTargets -Adb $adb -Flutter $flutter -Expected $serials
         Write-Host "Running on both selected emulators: $($serials -join ', ')" -ForegroundColor Green
         Write-Host 'Hot reload/restart applies to both devices in this terminal.'
-        Invoke-Checked $flutter @('run','--debug','--no-pub','-d','all')
+        Invoke-BothFlutterRuns -Flutter $flutter -Serials $serials -Apk $debugApk
     } else {
         Invoke-Checked $flutter @('run','--debug','--no-pub','-d',$serials[0])
     }
-    Assert-CleanTracked $git 'after Flutter run'
-    Write-Host 'Tracked checkout remains clean.' -ForegroundColor Green
+    Assert-TrackedState $git $trackedBefore 'after Flutter run' $sessionPaths
+    Write-Host 'The development session preserved tracked build configuration.' -ForegroundColor Green
     exit 0
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
-    if ($git) {
-        try { Assert-CleanTracked $git 'failure diagnostics' }
+    if ($null -ne $trackedBefore) {
+        try { Assert-TrackedState $git $trackedBefore 'failure diagnostics' $sessionPaths }
         catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
     }
     exit 1

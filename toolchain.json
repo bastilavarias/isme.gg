@@ -1,9 +1,10 @@
 {
-  "flutter": "3.38.10",
+  "flutter": "3.50.1",
+  "dart": "3.14.0",
   "java": "21",
-  "gradle": "8.13",
-  "androidGradlePlugin": "8.13.1",
-  "kotlin": "2.2.21",
+  "gradle": "9.5.0",
+  "androidGradlePlugin": "9.3.1",
+  "kotlin": "2.4.20",
   "androidSdk": 36,
   "androidBuildTools": "36.0.0"
 }

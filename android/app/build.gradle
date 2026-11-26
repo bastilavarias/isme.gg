@@ -32,6 +32,7 @@ if (metadataCredential && (metadataCredential.length() > 2048 || !(metadataCrede
 android {
     namespace "gg.isme.tv"
     compileSdk 36
+    buildToolsVersion "36.0.0"
     ndkVersion flutter.ndkVersion
     defaultConfig {
         applicationId "gg.isme.tv.flutter"
@@ -54,13 +55,12 @@ android {
         }
     }
     buildTypes {
-        debug { applicationIdSuffix ".debug" }
+        debug {
+            applicationIdSuffix ".debug"
+            ndk { abiFilters.addAll(releaseAbis + ["x86_64"]) }
+        }
         release {
-            // Flutter 3.38 sets default ABI filters on the build type.
-            ndk {
-                abiFilters.clear()
-                abiFilters.addAll(releaseAbis)
-            }
+            ndk { abiFilters.addAll(releaseAbis) }
             buildConfigField "String", "RELEASE_REPO", '"bastilavarias/isme.gg"'
             if (releaseSigningReady) signingConfig signingConfigs.release
         }
@@ -69,8 +69,12 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     packaging { resources.excludes += ["/META-INF/{AL2.0,LGPL2.1}"] }
+}
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
 }
 // Debug/emulator builds remain independent of release credentials.
 gradle.taskGraph.whenReady { graph ->

@@ -48,6 +48,8 @@ jobs:
       - name: Run actual Windows launcher without emulators
         shell: powershell
         run: |
+          python tools/check_toolchain.py --check-flutter
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\tools\setup-windows.ps1 -SkipPull -BuildOnly -JdkDir "$env:JAVA_HOME"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/check_toolchain.py --debug-apk build/app/outputs/flutter-apk/app-debug.apk

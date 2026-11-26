@@ -37,8 +37,10 @@ jobs:
         with:
           flutter-version: ${{ steps.toolchain.outputs.flutter }}
           channel: stable
-      - name: Verify Flutter version
-        run: python3 tools/check_toolchain.py --check-flutter
+      - name: Verify Flutter and configure the shared JDK
+        run: |
+          python3 tools/check_toolchain.py --check-flutter
+          flutter config --jdk-dir="$JAVA_HOME"
       - name: Validate inputs
         env:
           VERSION: ${{ inputs.version }}
