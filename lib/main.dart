@@ -210,7 +210,7 @@ class _CinemaHomeState extends State<CinemaHome> {
       return KeyEventResult.handled;
     }
     if(key==LogicalKeyboardKey.arrowLeft||key==LogicalKeyboardKey.arrowRight){
-      final nodes=[homeNav,searchNav,movieNav,seriesNav,animeNav,pinoyNav,myListNav,menuNav];
+      final nodes=[homeNav,searchNav,myListNav,movieNav,seriesNav,animeNav,pinoyNav,menuNav];
       final current=nodes.indexWhere((n)=>n.hasFocus);
       if(current>=0){nodes[(current+(key==LogicalKeyboardKey.arrowRight?1:-1)).clamp(0,nodes.length-1).toInt()].requestFocus();return KeyEventResult.handled;}
     }
@@ -403,13 +403,13 @@ class _CinemaHomeState extends State<CinemaHome> {
           child:Row(mainAxisSize:MainAxisSize.min,children:[
             navButton('Home',homeNav,!searching&&section=='Home',()=>showSection('Home'),category:'Home'),
             navButton('Search',searchNav,searching,showSearch,icon:Icons.search_rounded),
+            navButton('My List',myListNav,false,showMyList,icon:Icons.bookmark_border),
             navDivider(),
             navButton('Movies',movieNav,!searching&&section=='Movies',()=>showSection('Movies'),category:'Movies'),
             navButton('TV Series',seriesNav,!searching&&section=='Series',()=>showSection('Series'),category:'Series'),
             navButton('Anime',animeNav,!searching&&section=='Anime',()=>showSection('Anime'),category:'Anime'),
             navDivider(),
             navButton('Pinoy',pinoyNav,!searching&&section=='Pinoy',()=>showSection('Pinoy'),category:'Pinoy'),
-            navButton('My List',myListNav,false,showMyList),
           ])))),
         SizedBox(width:tv?100:40,child:Align(alignment:Alignment.centerRight,child:IconButton(key:menuAnchor,focusNode:menuNav,tooltip:'Menu',onPressed:openNavMenu,icon:const Icon(Icons.more_vert))))
       ])));

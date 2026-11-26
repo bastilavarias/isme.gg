@@ -144,6 +144,10 @@ void main(){
     page('Home');
     expect(find.byType(CinemaSearchPage),findsNothing);
     await right();
+    expect(tab('My List').hasFocus,isTrue);
+    expect(find.descendant(of:find.byKey(const ValueKey('nav-My List')),matching:find.byIcon(Icons.bookmark_border)),findsOneWidget);
+    page('Home');
+    await right();
     page('Movies');
     expect(tab('Movies').hasFocus,isTrue);
     await right();
@@ -152,9 +156,6 @@ void main(){
     page('Anime');
     await right();
     page('Pinoy');
-    await right();
-    page('Pinoy');
-    expect(tab('My List').hasFocus,isTrue);
     await right();
     page('Pinoy');
     expect(find.byType(PopupMenuItem),findsNothing);
