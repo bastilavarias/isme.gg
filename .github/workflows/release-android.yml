@@ -97,7 +97,13 @@ jobs:
           unset KEYSTORE_BASE64
           flutter build apk --release --no-pub --target-platform android-arm,android-arm64 --build-name "$VERSION" --build-number "$CODE"
           python3 tools/check_toolchain.py --clean
-          python3 tools/release_metadata.py --apk build/app/outputs/flutter-apk/app-release.apk --output "$RUNNER_TEMP/release" --version "$VERSION" --code "$CODE" --aapt2 "$ANDROID_HOME/build-tools/${{ steps.toolchain.outputs.androidBuildTools }}/aapt2" --apksigner "$ANDROID_HOME/build-tools/${{ steps.toolchain.outputs.androidBuildTools }}/apksigner" --signer "$SIGNER_SHA256"
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          callback='SwigDirector_alert_notify_callback_on_alert(Lorg/libtorrent4j/swig/alert_notify_callback;)V'
+          # The native library loads even when R8 has removed this Java upcall.
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" dex code \
+            --class org.libtorrent4j.swig.libtorrent_jni --method "$callback" "$apk" \
+            | grep -F "$callback" >/dev/null
+          python3 tools/release_metadata.py --apk "$apk" --output "$RUNNER_TEMP/release" --version "$VERSION" --code "$CODE" --aapt2 "$ANDROID_HOME/build-tools/${{ steps.toolchain.outputs.androidBuildTools }}/aapt2" --apksigner "$ANDROID_HOME/build-tools/${{ steps.toolchain.outputs.androidBuildTools }}/apksigner" --signer "$SIGNER_SHA256"
       - uses: actions/upload-artifact@v4
         with:
           name: isme-android-release
