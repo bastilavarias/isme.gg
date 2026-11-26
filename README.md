@@ -2,7 +2,7 @@
 
 isme.gg is a native media app for Android phones and Android TV. Browse movies, TV series, anime and Filipino cinema, then play media you have permission to access.
 
-[Official website and APK downloads](https://bastilavarias.github.io/isme.gg/#download) · [Release history](https://github.com/bastilavarias/isme.gg/releases) · [Report a problem](https://github.com/bastilavarias/isme.gg/issues/new)
+[Download APK](https://github.com/bastilavarias/isme.gg/releases/latest/download/isme.apk) · [Official website](https://bastilavarias.github.io/isme.gg/) · [Latest release and changelog](https://github.com/bastilavarias/isme.gg/releases/latest) · [Report a problem](https://github.com/bastilavarias/isme.gg/issues/new)
 
 ![isme.gg on Android TV, showing poster focus, changing artwork and category navigation](web/assets/screenshots/tv-hero.gif)
 
