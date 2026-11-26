@@ -1,46 +1,51 @@
-# isme.gg Flutter edition (0.3.0 development)
-Independent source project at /home/sebastech/projects/ismegg. Original React/WebView project is unchanged.
-This is an implementation draft, not a verified build. Flutter, Dart, JDK and Gradle are not available on the server PATH. No APK was compiled or installed there. Android compilation, physical TV navigation, subtitles and native playback still need verification on Windows.
+# isme.gg
 
-## Windows one-click development launcher
-Double-click `setupwindows.bat` in the repository root (or run `.\setupwindows.bat` in PowerShell). It fast-forward pulls main from GitHub, reloads its PowerShell helper if updated, restarts `ismegg_TV_API_36` with `-no-snapshot-load` (cold boot without wiping data), waits for Android boot, prepares fonts, Gradle wrapper and dependencies, then builds, installs and launches the debug app with `flutter run`. Keep the terminal open for hot reload (`r`, `R`, `q`). Use `-ReuseEmulator` to keep an already-running emulator, `-SkipPull` to test the existing checkout without updating, or `-Avd NAME` for another single-device AVD.
+isme.gg is a native media app for Android phones and Android TV. Browse movies, TV series, anime and Filipino cinema, then play media you have permission to access.
 
-```cmd
-setupwindows.bat -TV -ReuseEmulator
-setupwindows.bat -Mobile -ReuseEmulator
-setupwindows.bat -Both -ReuseEmulator
-```
+[Official website and APK downloads](https://bastilavarias.github.io/isme.gg/#download) · [Release history](https://github.com/bastilavarias/isme.gg/releases) · [Report a problem](https://github.com/bastilavarias/isme.gg/issues/new)
 
-TV remains the default. Mobile uses `ismegg_Mobile_API_36` (create this AVD first); `-Smartphone` and `-Phone` are aliases for `-Mobile`. Both waits for the two named AVDs, prepares dependencies once, and uses Flutter's multi-device debug runner for shared hot reload and restart. Disconnect unrelated Android devices and do not attach new devices while the multi-device runner starts. The launcher checks ADB and Flutter device lists before running both. Override default AVD names with `-TvAvd NAME` and `-MobileAvd NAME`. Mode flags are mutually exclusive. Existing options and local build settings are retained. After pulling this launcher update, verify TV, mobile, both, reuse, and extra-device rejection on Windows; PowerShell/Flutter are not installed on the server.
+![isme.gg on Android TV, showing poster focus, changing artwork and category navigation](web/assets/screenshots/tv-hero.gif)
 
-**Safe updates:** Non-conflicting tracked local edits are allowed; Git itself rejects updates that would overwrite them. No automatic stash, reset, force pull, or merge commit. Generated build outputs, local SDK paths, caches and scaffold-generated wrapper binaries/scripts are ignored; the Gradle version and Android configuration remain tracked. If a pull fails, inspect the reported paths and preserve your work before resolving the conflict.
+## Android TV
 
-**Existing Windows setup:** Keep your working checkout and installed tools. The known successful Windows build used JDK 21, Gradle 9.3.1, AGP 9.1.1 and Kotlin 2.4.10. The exact local build-file diffs have not been supplied, so the repository's previous Gradle/AGP/Kotlin versions are intentionally unchanged for now. Do not restore or overwrite working Android build settings merely to clean Git status. To reconcile portable configuration later, review `git diff HEAD -- analysis_options.yaml android/app/build.gradle android/gradle.properties android/gradle/wrapper/gradle-wrapper.properties android/settings.gradle` (remove private paths or credentials before sharing).
+![A series details screen with seasons and episode cards](web/assets/screenshots/tv-showcase.png)
 
-The launcher locates installed JDK 17 or 21 (or accepts `-JdkDir PATH` / `ISME_JDK_DIR`), sets JAVA_HOME for its process, and configures Flutter's user-wide JDK preference to avoid incompatible Java 25 runtimes. If missing, use the official Windows x64 JDK MSI from https://adoptium.net/temurin/releases/?version=21; Winget is not required. The launcher does not reinstall SDKs, modify AVD ABI/input settings, or wipe emulator data. Preserve local native-library compatibility adaptations. Windows execution of the updated launcher and eight UI improvements still needs verification.
+Use the D-pad to browse posters, switch catalogs and move between seasons. The layout keeps artwork and navigation readable from across the room.
 
-## Windows setup
-1. Install Flutter stable (Flutter >=3.38, Dart >=3.10), Android Studio, SDK 36, compatible JDK 17+ and platform tools. Run flutter doctor -v and flutter doctor --android-licenses.
-2. From PowerShell copy the source (same LAN, SSH access required):
-   `scp -r sebastech@192.168.1.109:/home/sebastech/projects/ismegg .`
-3. `cd ismegg`, `dart tools/prepare_fonts.dart`, `flutter pub get`, `flutter analyze`, `flutter test`. The font preparation step downloads the five official Poppins TTFs and OFL license from Google Fonts once; the Windows launcher runs it automatically. The fonts are bundled into the app at build time, not fetched at runtime. Run the same preparation step before any direct Flutter build on other platforms.
-4. Connect Android TV or phone with USB or wireless debugging; use `adb devices -l`, `flutter devices`, then `flutter run -d DEVICE_ID`. If a Gradle wrapper is not provisioned by Flutter, run .\tools\prepare-windows.ps1 first. No wrapper binary is checked into this source.
-5. Press r for Dart hot reload; Java changes need a restart/rebuild. Compare performance using `flutter run --profile -d DEVICE_ID`, not debug. Optional local test APK: `flutter build apk --debug`. Output: build/app/outputs/flutter-apk/app-debug.apk.
-6. Side-by-side debug app ID gg.isme.tv.flutter.debug. Existing v0.2.0 app and data are not modified. Do not uninstall original app. Production migration/signing is not configured.
+## Android phones and tablets
 
-## Architecture
-- Dart UI: home (focus-driven background on TV), lazy poster shelves, details, search, manual authorized magnet, native video controller, history and captions.
-- Native Java bridge starts authenticated HTTP service bound to 127.0.0.1 only; no bundled web UI, no WebView or runtime server host. Uses existing libtorrent4j, MediaCatalog, SubtitleSupport and ReleaseUpdater, with three bundled language catalogs. Native video_player Android backend uses ExoPlayer/Media3, subject to dependency resolution.
-- HTTP requests use a random per-process X-Isme-Token; range requests allow normal open-ended Media3 reads. Media pieces temporarily reside in app-private cache. External metadata/source/subtitle providers remain dependencies. Play only content you are authorized to access and test with legally shared media.
-- Player switches subtitle caption files on the same controller (no planned seek/reinitialize), supports play/pause, seek, source selection, resume and cancellation. Existing provider availability/codec issues are not solved by migration.
-- Original UI reference and orange/dark theme, independent Flutter widgets; no third-party clone source or assets imported because exact file licensing/dependencies were not audited.
-- Dependencies are provisional version constraints; lockfile and exact Android Gradle compatibility must be resolved on Windows. Riverpod deferred in favor of simple local state for first pass. Native updater code retained but intentionally disabled until repository and signing are configured. No automatic update or release signing yet. Audio track selection is implemented in source; subtitle timing adjustment remains a follow-up. See PLAYER_TESTING.md for unverified player regression checks.
-- Native method channel is used for connection and update action; on-device HTTP polling for existing engine state (not a full typed event-channel migration).
-## Local metadata cache
-See [METADATA_CACHE.md](METADATA_CACHE.md) for SQLite retention limits, provider badge configuration and device testing. No new Flutter plugin or Gradle change is required.
+<p>
+  <img src="web/assets/screenshots/mobile-home.png" width="225" alt="isme.gg portrait home screen with a featured film and bottom navigation">
+  <img src="web/assets/screenshots/mobile-details.png" width="225" alt="isme.gg film details on an Android phone">
+</p>
 
-## TV-first search
-Search opens with popular movies from the existing catalog cache, not a new request. The TV layout uses a left-side alphabetical/numeric keypad and right-side poster grid. Select **Use TV keyboard** to open Android's native input method in an editable dialog; Done/Back returns to the custom keyboard. Both use the same query, immediate in-memory matches from cached shelves/history and debounced remote results, deduplicated by movie ID. Search terms are not persisted. Mobile uses a standard text field and native keyboard. Test D-pad transitions (navbar, native-keyboard button, keypad, results, back), physical typing, native IME behavior on the target TV, empty/loading/error states, results scrolling, and compact provider pills. Android may suppress its software keyboard when a hardware keyboard is connected; the TV's own input settings govern this.
+Browse in portrait or landscape. Search across categories and resume supported titles from Continue watching. The fullscreen player offers seeking, subtitle options and audio track selection when available.
 
-## Validation checklist
-Run flutter analyze/test and compile on Windows. Verify TV launcher and D-pad navigation, focus after back, phone rotation and landscape controls, catalog and search, authorized test video startup/seek/subtitles, no position reset on caption switch, stop and cache cleanup, crash recovery, and memory/frame times over repeated playback. Check ARM64 and ARMv7 devices. Profile on the physical TV before claiming performance gains. No release cutover until these pass.
+## Install and update
+
+1. Get the current signed APK from the [official download page](https://bastilavarias.github.io/isme.gg/#download). The page shows its version, publication date, file size and changelog.
+2. On your phone or TV, open the downloaded APK. On Android TV, transfer it from another device if needed.
+3. Follow Android's installation prompts. If Android asks for permission, allow installation for the app opening the APK. You can revoke that permission afterward.
+4. Open isme.gg from the Android or Android TV launcher. To check for a newer stable build, open the app menu and choose **Check updates**.
+
+The same APK supports phones, tablets and Android TV running **Android 9 or later** on **ARM64** or **ARMv7**. Published releases include a SHA-256 checksum and an update manifest.
+
+## Architecture and privacy
+
+Flutter renders the phone and TV interfaces. A Java Android bridge runs libtorrent4j on the device and serves app-private playback over an authenticated loopback connection. The native player uses Android Media3. GitHub Pages serves the website, and GitHub Releases provides the signed APK and update metadata.
+
+Browsing requires external metadata services. Watch history, playback settings and the catalog cache are stored on the device. Playback can connect to peers that can see your network address. Use only media you have permission to access. Streaming platform names indicate discovery filters and availability information. isme.gg is independent of those services.
+
+## Development and support
+
+Start with [DEVELOPMENT.md](DEVELOPMENT.md) for the pinned Android and Flutter toolchain and emulator instructions. [RELEASE_UPDATES.md](RELEASE_UPDATES.md) explains release signing and updater verification. Include your app version, Android version, device model and reproduction steps in a [bug report](https://github.com/bastilavarias/isme.gg/issues/new).
+
+## Preview credits
+
+The screenshots and demo show the running app with a curated Blender open-movie catalog.
+
+- **Big Buck Bunny** © 2008 Blender Foundation / www.bigbuckbunny.org. [CC BY 3.0](https://peach.blender.org/about/).
+- **Sintel** © Blender Foundation / www.sintel.org. [CC BY 3.0](https://durian.blender.org/sharing/).
+- **Elephants Dream** © 2006 Blender Foundation / Netherlands Media Art Institute / www.elephantsdream.org. [CC BY 2.5](https://orange.blender.org/blog/creative-commons-license-2/).
+- **Caminandes** © Blender Foundation. [Creative Commons Attribution](https://studio.blender.org/remixing/).
+- **Spring** and **Tears of Steel** © Blender Foundation. [Creative Commons Attribution](https://studio.blender.org/remixing/).

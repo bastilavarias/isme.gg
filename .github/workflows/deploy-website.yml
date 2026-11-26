@@ -7,6 +7,8 @@ on:
       - 'web/**'
       - 'tools/website_releases.py'
       - 'tools/test_website_releases.py'
+      - 'tools/check_website.py'
+      - 'tools/test_check_website.py'
       - '.github/workflows/deploy-website.yml'
   # Releases made with GITHUB_TOKEN don't trigger another release workflow.
   # Refresh after the Android workflow finishes (build-only runs are harmless).
@@ -15,7 +17,7 @@ on:
     types: [completed]
     branches: [main]
   release:
-    types: [published]
+    types: [published, unpublished, deleted, edited]
 permissions:
   contents: read
 concurrency:
@@ -38,12 +40,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 -B -m unittest discover -s tools -p 'test_website_releases.py'
-          mkdir -p site/assets/screenshots
+          python3 -B -m unittest discover -s tools -p 'test_*website*.py'
+          mkdir -p site/assets/{screenshots,fonts}
           cp web/index.html web/robots.txt web/sitemap.xml web/llms.txt site/
-          cp web/assets/releases.js site/assets/
-          cp web/assets/screenshots/tv-home.png web/assets/screenshots/tv-showcase.png site/assets/screenshots/
+          cp web/assets/{hero.js,releases.js} site/assets/
+          cp web/assets/fonts/{nunito-latin.woff2,OFL.txt} site/assets/fonts/
+          cp web/assets/screenshots/{tv-hero.gif,tv-hero.webm,tv-hero.mp4,tv-hero-poster.webp,tv-home.png,tv-showcase.png,mobile-home.png,mobile-details.png,player-showcase.png} site/assets/screenshots/
           python3 tools/website_releases.py --output site/assets/releases.json
+          python3 tools/check_website.py site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

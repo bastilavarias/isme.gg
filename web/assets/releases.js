@@ -34,6 +34,7 @@
       }
       const r = feed.latest;
       if (!valid(r) || r.downloadUrl !== base + '/releases/download/' + r.tag + '/isme.apk'
+        || !date(r.publishedAt)
         || !Number.isSafeInteger(r.bytes) || r.bytes < 1 || r.bytes > 200*1024*1024
         || r.minimumAndroidSdk !== 28 || !Array.isArray(r.abis)
         || !r.abis.includes('arm64-v8a') || !r.abis.includes('armeabi-v7a')) throw new Error('Invalid release');
@@ -41,7 +42,6 @@
       text('release-summary', [date(r.publishedAt), (r.bytes/1048576).toFixed(1) + ' MiB', 'Android 9+ · ARM64 / ARMv7'].filter(Boolean).join(' · '));
       document.querySelectorAll('[data-apk-download]').forEach(a => {
         a.href = r.downloadUrl;
-        a.querySelector('[data-download-label]').textContent = 'Download APK';
         a.removeAttribute('aria-disabled');
       });
       text('latest-release-title', 'What’s new in ' + r.tag);
@@ -53,6 +53,6 @@
     })
     .catch(() => {
       text('release-status', 'Release information unavailable');
-      text('release-summary', 'Check the project releases page for verified downloads.');
+      text('release-summary', 'Try reloading this page to check for the current signed APK.');
     });
 })();
