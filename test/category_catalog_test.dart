@@ -155,7 +155,8 @@ void main(){
     await right();
     page('Pinoy');
     expect(find.byType(PopupMenuItem),findsNothing);
-    expect(tester.widget<IconButton>(find.byTooltip('Menu')).focusNode!.hasFocus,isTrue);
+    final menu = find.ancestor(of: find.byTooltip('Menu'), matching: find.byType(IconButton));
+    expect(tester.widget<IconButton>(menu).focusNode!.hasFocus, isTrue);
     tab('Search').requestFocus();
     await tester.pumpAndSettle();
     page('Pinoy');

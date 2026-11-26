@@ -1,7 +1,8 @@
 # isme.gg GitHub Releases updater
 
-## Status
-Source implementation only. SEBASTECH does not have the Android/Flutter toolchain; no signed APK, key, public release or deployment has been created. Confirm repository visibility and review distribution rights before publishing.
+## Distribution
+
+The [official website](https://bastilavarias.github.io/isme.gg/#download) reads a public release feed generated from GitHub Releases. The website and the in-app updater use the same signed APK.
 
 ## Release contract
 One adaptive ARM APK, application ID `gg.isme.tv.flutter`, Android API 28+, ARM64 and ARMv7. Device detection is unchanged. Debug uses `.debug` and deliberately cannot self-update to a release. x86-only devices are not supported by this release APK.
@@ -16,14 +17,14 @@ The updater reads the public GitHub latest stable release, exact repo/tag asset 
 Startup checks are delayed slightly. A lightweight foreground timer ticks every minute; network checks are throttled to six hours per running process, failed checks to 15 minutes. Discovery may run during playback, but prompts are deferred during playback and support menus/dialogs. The timer stops when the app leaves the foreground; no persistent service is installed. Manual checks bypass cooldown. Later suppresses that release for six hours (persisted). A pending update prompt waits until the playback screen exits. Background completion is shown on return. The user can cancel the download, retry failure or postpone installation. Temporary files are removed on normal failure/cancel; a stale partial file after abrupt process death is replaced on the next download. Downloading does not persist across process death.
 
 ## Signing and release preparation
-Before building a real release, establish and securely back up a permanent Android signing keystore. Never send private key or passwords in chat or commit them. If any existing *release* APK is distributed, reuse its signing identity; debug installations have a different package ID and are not upgraded by a release. No production signing key was created or inspected here.
+Use the existing permanent Android signing keystore and keep its encrypted backup. Keep private keys and passwords out of Git and chat. Debug installations use a separate package ID.
 
 Local Gradle release configuration reads ignored `android/key.properties` (storeFile relative to android/ or absolute path, storePassword, keyAlias, keyPassword) or environment variables ISME_KEYSTORE_PATH, ISME_KEYSTORE_PASSWORD, ISME_KEY_ALIAS, ISME_KEY_PASSWORD. Release tasks fail without signing configuration. Existing debug setup is unchanged.
 
 ## GitHub Actions (manual dispatch)
-Configure GitHub environments **android-signing** (restrict to main) and **android-public-release** (restrict to main and require reviewer approval where supported). Under android-signing set secrets ISME_KEYSTORE_BASE64, ISME_KEYSTORE_PASSWORD, ISME_KEY_ALIAS, ISME_KEY_PASSWORD; set environment variable ISME_SIGNER_SHA256 to the permanent certificate's public SHA-256 fingerprint. Base64 is an encoding, not encryption; store it only as a protected secret. Keep an offline encrypted backup.
+The **android-signing** and **android-public-release** environments are restricted to main. The signing environment uses the protected secrets ISME_KEYSTORE_BASE64, ISME_KEYSTORE_PASSWORD, ISME_KEY_ALIAS and ISME_KEY_PASSWORD, plus the public certificate fingerprint in ISME_SIGNER_SHA256. Publication also requires TMDB_API_KEY or TMDB_READ_TOKEN provisioned for distribution inside the public client. APK recipients can extract that credential.
 
-Run Android release candidate from Actions on main with a stable version and unique monotonically increasing versionCode. Default publish=false builds, tests, signs and uploads a private workflow artifact only. Enable publish=true only after signed device testing, and approve the public-release environment; the workflow checks the prior stable release's manifest before publishing and refuses an existing release. If an older release lacks update.json, migrate deliberately rather than bypassing the check. Restrict Actions permissions and review action version pinning before production. The configured Flutter 3.38.0 CI toolchain must be validated; local Windows Gradle versions have previously differed. A private repository cannot serve anonymous in-app checks.
+Run **Android release candidate** from Actions on main with a stable version and an increasing versionCode. Match both values to `pubspec.yaml` for the release commit. The default `publish=false` tests, signs and uploads a workflow artifact. After validating the signed candidate on compatible devices, run the workflow with `publish=true` on the same commit and have a designated reviewer approve the public release environment. The workflow uses the pins in [toolchain.json](toolchain.json), checks prior release metadata and rejects an existing release tag. GitHub Pages refreshes the download feed when the publish workflow succeeds.
 
 ## Verification checklist
 1. Run python3 -B -m unittest discover -s tools -p 'test_release_metadata.py'. Tests use fake Android tools, not real APK verification.

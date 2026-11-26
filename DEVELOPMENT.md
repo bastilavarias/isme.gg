@@ -1,6 +1,6 @@
 # Development and release toolchain
 
-Use one canonical Windows checkout and one shared main branch. SEBASTECH is the source-development checkout; Windows is a testing checkout. Do not maintain Windows-only changes to tracked Gradle files.
+Use one canonical Windows checkout and one shared main branch. Keep tracked Gradle configuration portable across Windows and CI.
 
 ## Shared versions
 
@@ -25,7 +25,7 @@ Machine-specific settings remain in ignored files: android/local.properties (SDK
 
 The Android development checks workflow runs on Windows with the same launcher in build-only mode. It compiles, runs Flutter analysis/tests and Python regression tests, and checks that no tracked source files changed. The release workflow consumes the same pins and checks the checkout after preparation, tests and signed compilation. Neither development check publishes an APK.
 
-The repository does not yet track pubspec.lock. CI uploads the resolved lockfile as a review artifact; commit the verified lockfile once obtained. The launcher and release workflow enforce it once tracked. Until then, exact transitive package reproducibility is not guaranteed.
+The launcher and release workflow enforce the tracked `pubspec.lock`. CI also uploads the resolved lockfile for review.
 
 ## Acceptance
 

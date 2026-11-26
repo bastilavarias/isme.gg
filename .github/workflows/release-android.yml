@@ -44,7 +44,15 @@ jobs:
           VERSION: ${{ inputs.version }}
           CODE: ${{ inputs.version_code }}
         run: |
-          python3 -c 'import os,re; v=os.environ["VERSION"]; c=os.environ["CODE"]; assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",v); assert re.fullmatch(r"[1-9][0-9]*",c) and int(c)<=2100000000'
+          python3 -c '
+          import os, re
+          from pathlib import Path
+          version, code = os.environ["VERSION"], os.environ["CODE"]
+          part = r"(?:0|[1-9][0-9]*)"
+          assert re.fullmatch(r"\.".join([part] * 3), version), "Expected a stable X.Y.Z version"
+          assert re.fullmatch(r"[1-9][0-9]*", code) and int(code) <= 2100000000, "Invalid versionCode"
+          assert f"version: {version}+{code}" in Path("pubspec.yaml").read_text().splitlines(), "Workflow version must match pubspec.yaml"
+          '
       - name: Prepare build
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-${{ steps.toolchain.outputs.androidSdk }}" "build-tools;${{ steps.toolchain.outputs.androidBuildTools }}"
@@ -104,6 +112,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: isme-android-release
@@ -119,15 +130,32 @@ jobs:
           set -euo pipefail
           (cd release && sha256sum -c SHA256SUMS.txt)
           python3 -c 'import json,os; d=json.load(open("release/update.json")); assert d["version"]==os.environ["VERSION"] and d["versionCode"]==int(os.environ["CODE"])'
-          # Require a newer versionCode than the current stable release, if any.
+          # Check every public stable release, including releases not marked latest.
           tags="$(gh api "repos/$GH_REPO/releases?per_page=100" --paginate --jq '.[] | select(.draft==false and .prerelease==false) | .tag_name')"
-          latest="$(printf '%s\n' "$tags" | sed -n '1p')"
-          if [ -n "$latest" ]; then
-            gh release download "$latest" --pattern update.json --output "$RUNNER_TEMP/previous-update.json"
-            python3 -c 'import json,os; p=json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"previous-update.json"))); assert int(os.environ["CODE"])>p["versionCode"], "versionCode must increase"'
-          fi
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            gh release download "$tag" --pattern update.json --output "$RUNNER_TEMP/previous-update.json" --clobber
+            PRIOR_TAG="$tag" python3 -c '
+          import json, os, re
+          from pathlib import Path
+          tag = os.environ["PRIOR_TAG"]
+          prior = json.loads((Path(os.environ["RUNNER_TEMP"]) / "previous-update.json").read_text())
+          assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag) and prior["version"] == tag[1:], f"Invalid prior release metadata for {tag}"
+          version = lambda value: tuple(map(int, value.split(".")))
+          assert version(os.environ["VERSION"]) > version(prior["version"]), f"Version must be newer than {tag}"
+          assert type(prior["versionCode"]) is int and 0 < prior["versionCode"] < int(os.environ["CODE"]), f"versionCode must increase beyond {tag}"
+          '
+          done <<< "$tags"
           if gh release view "v$VERSION" >/dev/null 2>&1; then
             echo "Release already exists; refusing to overwrite." >&2
             exit 1
           fi
-          gh release create "v$VERSION" release/isme.apk release/update.json release/SHA256SUMS.txt --target "$COMMIT" --title "isme.gg v$VERSION" --generate-notes --latest
+          if gh api "repos/$GH_REPO/git/ref/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "Tag already exists; refusing to reuse it." >&2
+            exit 1
+          fi
+          notes=(--generate-notes)
+          if [ -f "releases/v$VERSION.md" ]; then
+            notes=(--notes-file "releases/v$VERSION.md")
+          fi
+          gh release create "v$VERSION" release/isme.apk release/update.json release/SHA256SUMS.txt --target "$COMMIT" --title "isme.gg v$VERSION" "${notes[@]}" --latest
