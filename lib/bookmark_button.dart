@@ -22,11 +22,13 @@ class _BookmarkButtonState extends State<BookmarkButton>{
   @override Widget build(BuildContext context)=>ListenableBuilder(listenable:widget.store,builder:(_,__){
     final saved=widget.store.contains(widget.movie);
     return Shortcuts(shortcuts:const {SingleActivator(LogicalKeyboardKey.select):ActivateIntent()},
-      child:Semantics(toggled:saved,child:OutlinedButton.icon(
+      child:Semantics(toggled:saved,child:TextButton.icon(
       key:const ValueKey('bookmark-toggle'),focusNode:widget.focusNode,
       // Keep focus when a write is in flight; toggle guards repeated activation.
       onPressed:BookmarkStore.valid(BookmarkStore.parent(widget.movie))?toggle:null,
       icon:Icon(saved?Icons.bookmark:Icons.bookmark_border,color:saved?CinemaColors.accent:null),
-      label:Text(saved?'Saved':'My List'),style:OutlinedButton.styleFrom(minimumSize:const Size(0,48)))));
+      label:Text(saved?'Saved':'My List'),style:TextButton.styleFrom(
+        foregroundColor:CinemaColors.accent,minimumSize:const Size(0,48),
+        backgroundColor:Colors.transparent)))));
   });
 }
