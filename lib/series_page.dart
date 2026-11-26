@@ -117,6 +117,20 @@ class _SeriesPageState extends State<SeriesPage> {
       if(mounted&&run==_generation)setState((){_loading=false;_error='Episodes unavailable. Try again.';});
     }
   }
+  void _seasonFocused(int number){
+    if(!widget.engine.tv||!mounted||number==_season)return;
+    _chooseSeason(number);
+  }
+  void _seasonPressed(int number){
+    if(number!=_season||_error!=null){
+      _chooseSeason(number,focusEpisodes:widget.engine.tv);
+      return;
+    }
+    if(widget.engine.tv&&!_loading&&_episodes.isNotEmpty){
+      final index=_episodes.indexWhere((e)=>e.number==_highlight?.number);
+      _focusEpisode(index<0?0:index);
+    }
+  }
   KeyEventResult _seasonKeys(FocusNode node,KeyEvent event){
     if(!widget.engine.tv||event is! KeyDownEvent&&event is! KeyRepeatEvent)return KeyEventResult.ignored;
     if(event.logicalKey==LogicalKeyboardKey.arrowUp){_back.requestFocus();return KeyEventResult.handled;}
@@ -151,8 +165,9 @@ class _SeriesPageState extends State<SeriesPage> {
       controller:_seasonScroll,scrollDirection:Axis.horizontal,itemCount:_seasons.length,
       separatorBuilder:(_,__)=>const SizedBox(width:8),itemBuilder:(context,i){
         final s=_seasons[i];final active=s.number==_season;
-        return RemoteTile(label:s.name,autofocus:widget.engine.tv&&active,
-          onPressed:()=>_chooseSeason(s.number,focusEpisodes:widget.engine.tv),
+        return RemoteTile(key:ValueKey('season-${s.number}'),label:s.name,autofocus:widget.engine.tv&&active,animateFocus:true,
+          onFocused:widget.engine.tv?()=>_seasonFocused(s.number):null,
+          onPressed:()=>_seasonPressed(s.number),
           child:Padding(padding:const EdgeInsets.symmetric(horizontal:14),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[
             Text(s.name,style:TextStyle(color:active?CinemaColors.ink:CinemaColors.muted,fontWeight:active?FontWeight.w600:FontWeight.w400)),
             const SizedBox(height:4),AnimatedContainer(duration:_motion,width:active?32:0,height:2,color:CinemaColors.accent),
@@ -186,6 +201,28 @@ class _SeriesPageState extends State<SeriesPage> {
                 ]))),
             ]))));
       }))));
+  Widget _episodeCatalog(bool tv){
+    // Keep the rail footprint stable while a season loads. Animate only the
+    // incoming rail so outgoing FocusNodes and the ScrollController are never
+    // shared by two simultaneous episode lists.
+    final height=tv?176.0:154.0;
+    if(_loading)return SizedBox(height:height,child:const Center(child:LinearProgressIndicator()));
+    if(_error!=null)return SizedBox(height:height,child:Center(child:Row(children:[
+      Expanded(child:Text(_error!,style:const TextStyle(color:CinemaColors.muted))),
+      TextButton(onPressed:()=>_season==null?_loadSeasons():_chooseSeason(_season!),child:const Text('Retry')),
+    ])));
+    if(_episodes.isEmpty)return SizedBox(height:height,child:const Center(child:Text('No episodes listed.')));
+    return TweenAnimationBuilder<double>(
+      key:ValueKey('season-catalog-$_season'),
+      tween:Tween<double>(begin:0,end:1),
+      duration:_motion,curve:Curves.easeOutCubic,
+      child:_rail(tv),
+      builder:(context,value,child)=>Opacity(
+        opacity:value,
+        child:Transform.translate(offset:Offset(12*(1-value),0),child:child),
+      ),
+    );
+  }
   @override Widget build(BuildContext context){
     final show=widget.show,tv=widget.engine.tv,ep=_highlight;
     final art=ep?.thumbnail.isNotEmpty==true?ep!.thumbnail:show.art;
@@ -217,10 +254,7 @@ class _SeriesPageState extends State<SeriesPage> {
           const SizedBox(height:12),
           if(_seasons.isNotEmpty)_tabs(),
           const SizedBox(height:8),
-          if(_loading)const Padding(padding:EdgeInsets.symmetric(vertical:24),child:LinearProgressIndicator())
-          else if(_error!=null)Row(children:[Expanded(child:Text(_error!,style:const TextStyle(color:CinemaColors.muted))),TextButton(onPressed:()=>_season==null?_loadSeasons():_chooseSeason(_season!),child:const Text('Retry'))])
-          else if(_episodes.isEmpty)const Padding(padding:EdgeInsets.all(20),child:Text('No episodes listed.'))
-          else _rail(tv),
+          _episodeCatalog(tv),
 
         ])),
     ]))));
