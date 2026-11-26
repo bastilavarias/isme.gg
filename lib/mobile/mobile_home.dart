@@ -38,6 +38,8 @@ class _MobileHomeState extends State<MobileHome>{
   String category='Home',searchCategory='All';
   List<Movie> results=[];
   List<String> recent=[];
+  final discoveryArtwork=<String,List<String>>{};
+  bool loadingDiscoveryArtwork=false;
   int tab=0,revision=0,searchRevision=0,directoryRevision=0;
   bool busy=true,searching=false,platformBusy=false,searchFailed=false,opening=false;
   Timer? debounce;
@@ -61,7 +63,7 @@ class _MobileHomeState extends State<MobileHome>{
   }
   @override void initState(){
     super.initState();library=MobileLibrary(widget.history);
-    recent=widget.history.prefs.getStringList('isme-mobile-searches')??[];
+    recent=(widget.history.prefs.getStringList('isme-mobile-searches')??[]).map((s)=>s.trim()).where((s)=>s.isNotEmpty).toList();
     unawaited(load());unawaited(loadDirectory());
   }
   @override void dispose(){
@@ -313,9 +315,43 @@ class _MobileHomeState extends State<MobileHome>{
     setState(()=>recent=[]);
     unawaited(widget.history.prefs.remove('isme-mobile-searches'));
   }
+  Map<String,List<String>> get categoryArtwork=> {
+    for(final entry in discoveryArtworkKeys.entries)
+      entry.key:discoveryPosters(shelves[entry.value]??const []).length>=2
+        ?discoveryPosters(shelves[entry.value]!)
+        :discoveryArtwork[entry.key]??discoveryPosters(shelves[entry.value]??const []),
+  };
+  Future<void> loadDiscoveryArtwork() async{
+    if(loadingDiscoveryArtwork)return;
+    loadingDiscoveryArtwork=true;
+    try{
+      final entries=discoveryArtworkKeys.entries.toList();
+      for(var i=0;i<entries.length;i+=2){
+        if(!mounted)return;
+        await Future.wait(entries.skip(i).take(2).map((entry)async{
+          final existing=categoryArtwork[entry.key]??const <String>[];
+          if(existing.length>=2)return;
+          try{
+            final cached=await engine.catalogSnapshot(entry.value,mode:'cached');
+            if(!mounted)return;
+            var images=discoveryPosters(cached.movies);
+            if(images.length>existing.length)setState(()=>discoveryArtwork[entry.key]=images);
+            if(images.length<2&&existing.length<2){
+              final live=await engine.catalogSnapshot(entry.value);
+              if(!mounted)return;
+              images=discoveryPosters(live.movies);
+              if(images.length>(categoryArtwork[entry.key]?.length??0))setState(()=>discoveryArtwork[entry.key]=images);
+            }
+          }catch(_){/* Keep the category usable when artwork is unavailable. */}
+        }));
+      }
+    }finally{loadingDiscoveryArtwork=false;}
+  }
+  Widget discoveryHeading(String title)=>Padding(padding:const EdgeInsets.fromLTRB(16,0,16,12),
+    child:Text(title,style:const TextStyle(fontSize:19,fontWeight:FontWeight.w700)));
   Widget discovery()=>ListView(
     key:const PageStorageKey('mobile-discovery'),
-    padding:const EdgeInsets.only(bottom:24),
+    padding:const EdgeInsets.only(top:16,bottom:24),
     children:[
       if(recent.isNotEmpty)...[
         Padding(padding:const EdgeInsets.fromLTRB(16,0,16,0),child:Row(children:[
@@ -326,13 +362,14 @@ class _MobileHomeState extends State<MobileHome>{
           for(final value in recent.take(4))ActionChip(avatar:const Icon(Icons.history,size:16),
             label:Text(value,maxLines:1,overflow:TextOverflow.ellipsis),onPressed:(){query.text=value;search(value);}),
         ])),
+        const SizedBox(height:28),
       ],
-      heading('Browse categories'),
-      Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:DiscoveryGrid(tiles:mobileCategories,onSelected:browse)),
-      const SizedBox(height:16),
-      heading('Browse genres'),
+      discoveryHeading('Browse categories'),
+      Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:DiscoveryCategoryList(tiles:mobileCategories,posters:categoryArtwork,onSelected:browse)),
+      const SizedBox(height:28),
+      discoveryHeading('Browse genres'),
       Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:DiscoveryGrid(tiles:mobileGenres,onSelected:browse)),
-      const SizedBox(height:24),
+      const SizedBox(height:28),
       PlatformRail(providers:[...directory,...artwork],selected:PlatformBrand.all,onSelected:browsePlatform,onUp:(){},onDown:(){},tv:false),
     ]);
   Widget searchPage(){
@@ -401,6 +438,7 @@ class _MobileHomeState extends State<MobileHome>{
     if(tab==1)return;
     searchFocus.unfocus();
     setState(()=>tab=1);
+    unawaited(loadDiscoveryArtwork());
   }
   bool backToHome(){
     if(tab==1&&query.text.trim().isNotEmpty){query.clear();search('');searchFocus.unfocus();return true;}

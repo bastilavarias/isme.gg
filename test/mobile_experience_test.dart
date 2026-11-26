@@ -7,6 +7,7 @@ import 'package:ismegg/engine.dart';
 import 'package:ismegg/mobile/mobile_home.dart';
 import 'package:ismegg/mobile/mobile_library.dart';
 import 'package:ismegg/mobile/mobile_details.dart';
+import 'package:ismegg/mobile/mobile_discovery.dart';
 
 class MobileTestEngine extends NativeEngine{
   static const film=Movie(id:'imdb:tt1234567',title:'Example film');
@@ -63,6 +64,12 @@ void main(){
     expect(field,findsOneWidget);
     expect(tester.widget<TextField>(field).focusNode!.hasFocus,isFalse);
     expect(find.text('Browse categories'),findsOneWidget);
+    expect(find.text('Recent searches'),findsNothing);
+    final movies=find.byKey(const ValueKey('mobile-discover-Movies'));
+    final series=find.byKey(const ValueKey('mobile-discover-TV Series'));
+    expect(tester.getSize(movies).width,closeTo(358,1));
+    expect(tester.getTopLeft(movies).dx,tester.getTopLeft(series).dx);
+    expect(tester.getTopLeft(series).dy,greaterThan(tester.getBottomLeft(movies).dy));
     await tester.enterText(field,'Example');await tester.pumpAndSettle();
     expect(find.text('Browse categories'),findsNothing);
     expect(find.byTooltip('Clear search'),findsOneWidget);
@@ -86,6 +93,33 @@ void main(){
       scrollable:find.descendant(of:find.byKey(const PageStorageKey('mobile-home')),matching:find.byType(Scrollable)).first);
     expect(find.text('Explore platforms'),findsOneWidget);
     expect(tester.takeException(),isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+  test('category artwork uses two unique poster URLs only',(){
+    const rows=[
+      Movie(id:'1',title:'One',poster:'https://example.com/one.jpg'),
+      Movie(id:'2',title:'Duplicate',poster:'https://example.com/one.jpg'),
+      Movie(id:'3',title:'No poster',backdrop:'https://example.com/backdrop.jpg'),
+      Movie(id:'4',title:'Two',poster:'https://example.com/two.jpg'),
+      Movie(id:'5',title:'Three',poster:'https://example.com/three.jpg'),
+    ];
+    expect(discoveryPosters(rows),['https://example.com/one.jpg','https://example.com/two.jpg']);
+  });
+  testWidgets('clearing recent searches removes the entire section',(tester)async{
+    SharedPreferences.setMockInitialValues({'isme-mobile-searches':['Example','  ']});
+    final prefs=await SharedPreferences.getInstance();
+    final engine=MobileTestEngine();addTearDown(engine.dispose);
+    await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:deviceHome(engine,History.inMemory(prefs))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('mobile-nav-Search')));
+    await tester.pumpAndSettle();
+    expect(find.text('Recent searches'),findsOneWidget);
+    expect(find.text('Example'),findsOneWidget);
+    await tester.tap(find.text('Clear'));
+    await tester.pumpAndSettle();
+    expect(find.text('Recent searches'),findsNothing);
+    expect(find.text('Clear'),findsNothing);
+    expect(prefs.containsKey('isme-mobile-searches'),isFalse);
     await tester.pumpWidget(const SizedBox.shrink());
   });
   testWidgets('mobile episodes list and season sheet work without TV focus widgets',(tester)async{
