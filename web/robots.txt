@@ -1,0 +1,5 @@
+# Public-launch crawl policy. Preview HTML retains noindex until approved.
+User-agent: *
+Allow: /
+
+Sitemap: https://isme.gg/sitemap.xml

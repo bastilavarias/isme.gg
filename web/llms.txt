@@ -1,0 +1,11 @@
+# isme.gg
+
+> A cinema-first media app for Android and Android TV, designed for discovering movies, Filipino cinema, TV series, anime and K-drama and playing authorized media.
+
+## Information
+- [Website](https://isme.gg/): product features, supported device targets and category overview.
+- [FAQ](https://isme.gg/#faq): content availability, privacy, platform support and advertising.
+- [Project releases](https://github.com/bastilavarias/isme.gg/releases): available builds and release details.
+
+## Accuracy notes
+The landing page is a private design preview until public launch. Artwork and streaming service logos are illustrative, not evidence of access or official partnerships. Media availability depends on authorized sources and region. Privacy-first does not mean anonymous: peer-to-peer networking can expose IP addresses.
