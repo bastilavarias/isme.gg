@@ -275,6 +275,9 @@ class NativeEngine {
   }
   Future<void> openIssueReport()=>channel.invokeMethod<void>('openIssueReport');
   Future<bool> clearLocalData() async=>await channel.invokeMethod<bool>('clearLocalData')??false;
+  Future<void> setPlaybackScreenOn(bool active) async {
+    try{await channel.invokeMethod<void>('setPlaybackScreenOn',{'active':active});}catch(_){}
+  }
   Future<void> setPlaybackActive(bool active) async {
     try{await channel.invokeMethod<void>('setPlaybackActive',{'active':active});}catch(_){}
   }

@@ -17,6 +17,12 @@ public final class MainActivity extends FlutterActivity {
     private LocalCinemaServer cinema;
     private UpdateFlow updater;
     private boolean tv;
+    private boolean keepPlaybackScreenOn;
+    private boolean foreground;
+    private void applyPlaybackScreenFlag() {
+        if (foreground && keepPlaybackScreenOn) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
     @Override protected void onCreate(Bundle state) {
         tv = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_TYPE_MASK)
             == Configuration.UI_MODE_TYPE_TELEVISION;
@@ -78,14 +84,18 @@ public final class MainActivity extends FlutterActivity {
                         boolean accepted = manager != null && manager.clearApplicationUserData();
                         result.success(accepted);
                     } catch (Exception e) { result.error("RESET", "Could not clear app data", null); }
+                } else if ("setPlaybackScreenOn".equals(call.method)) {
+                    keepPlaybackScreenOn = Boolean.TRUE.equals(call.argument("active"));
+                    applyPlaybackScreenFlag();
+                    result.success(null);
                 } else if ("setPlaybackActive".equals(call.method)) {
                     if (updater != null) updater.playback(Boolean.TRUE.equals(call.argument("active")));
                     result.success(null);
                 } else { result.notImplemented(); }
             });
     }
-    @Override protected void onResume() { super.onResume(); if (updater != null) updater.resume(); }
-    @Override protected void onPause() { if (updater != null) updater.pause(); super.onPause(); }
+    @Override protected void onResume() { super.onResume(); foreground = true; applyPlaybackScreenFlag(); if (updater != null) updater.resume(); }
+    @Override protected void onPause() { foreground = false; keepPlaybackScreenOn = false; applyPlaybackScreenFlag(); if (updater != null) updater.pause(); super.onPause(); }
     @Override protected void onDestroy() {
         if (updater != null) updater.close();
         if (cinema != null) cinema.close();

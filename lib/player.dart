@@ -288,6 +288,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   Future<void> start({int index=0,bool resetBudget=true}) async {
     if(closed||!mounted)return;
     final old=pending;
+    syncPlaybackScreen(false);
     final n=++generation;
     cancelAttempt();subtitleRevision++;audioRevision++;recommendedAudioId=null;audioTracks=[];watchdog?.cancel();saveTimer?.cancel();hide?.cancel();
     if(resetBudget){recovery.reset();lastFault='none';wantsPlayback=_foreground;}
@@ -366,6 +367,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
           if(!active(n))return;
           setState((){player=c;busy=false;phase='Playing';});
           adopted=true;
+          syncPlaybackScreen(wantsPlayback);
           lastPosition=c.value.position;lastAdvance=DateTime.now();
           saveTimer=Timer.periodic(const Duration(seconds:15),(_){final current=player;if(current!=null)unawaited(save(current));});
           watchdog=Timer.periodic(const Duration(seconds:2),(_)=>monitor(c,n));
@@ -387,7 +389,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     }
     if(v.position!=lastPosition){lastPosition=v.position;resume=v.position;lastAdvance=DateTime.now();}
     _sampleNext(c,n);
-    if(v.isCompleted){wantsPlayback=false;lastAdvance=DateTime.now();return;}
+    if(v.isCompleted){wantsPlayback=false;syncPlaybackScreen(false);lastAdvance=DateTime.now();return;}
     if(!wantsPlayback){lastAdvance=DateTime.now();return;}
     if(DateTime.now().difference(lastAdvance)>const Duration(seconds:40)){
       recoverRuntime(const PlaybackFailure(PlaybackFault.transient,'Playback stalled'));
@@ -404,6 +406,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   Future<void> stopAfterFailure() async {
     if(closed||!mounted)return;
+    syncPlaybackScreen(false);
     final n=++generation;cancelAttempt();saveTimer?.cancel();hide?.cancel();
     final c=player;
     setState((){player=null;busy=true;phase='Stopping';});
@@ -511,9 +514,17 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(controls){armControlsTimer();if(widget.engine.tv&&moveControl(key))return KeyEventResult.handled;}
     return KeyEventResult.ignored;
   }
+  bool _screenOn=false;
+  void syncPlaybackScreen(bool active){
+    final next=active&&_foreground&&!closed;
+    if(next==_screenOn)return;
+    _screenOn=next;
+    unawaited(widget.engine.setPlaybackScreenOn(next));
+  }
   Future<void> setPlaying(bool value) async{
     final c=player;if(c==null||closed||busy)return;
     wantsPlayback=value;lastAdvance=DateTime.now();
+    syncPlaybackScreen(value);
     if(!value){_stopCountdown();_nextGate.reset();_cancelPreparation();if(c.value.isCompleted)setState(()=>_nextDismissed=true);}
     try{
       if(value){if(c.value.isCompleted){_markSeek(Duration.zero,c.value.duration);await c.seekTo(Duration.zero);}await c.play();}
@@ -684,11 +695,11 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   @override void didChangeAppLifecycleState(AppLifecycleState state){
     _foreground=state==AppLifecycleState.resumed;
-    if(!_foreground){_stopCountdown();_nextGate.reset();_cancelPreparation();wantsPlayback=false;final c=player;if(c!=null){unawaited(c.pause());unawaited(save(c));}}
+    if(!_foreground){syncPlaybackScreen(false);_stopCountdown();_nextGate.reset();_cancelPreparation();wantsPlayback=false;final c=player;if(c!=null){unawaited(c.pause());unawaited(save(c));}}
     if(mounted&&!closed)setState((){});
   }
   Future<void> shutdown() async {
-    if(closed)return;closed=true;generation++;subtitleRevision++;cancelAttempt();hide?.cancel();saveTimer?.cancel();watchdog?.cancel();_stopCountdown();_cancelPreparation();
+    if(closed)return;syncPlaybackScreen(false);closed=true;generation++;subtitleRevision++;cancelAttempt();hide?.cancel();saveTimer?.cancel();watchdog?.cancel();_stopCountdown();_cancelPreparation();
     final c=player;player=null;
     if(c!=null){await save(c);try{await c.dispose();}catch(_){}}
     // Cancel engine while a pending initialization/poll is in flight.
