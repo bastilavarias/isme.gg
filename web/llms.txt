@@ -1,6 +1,6 @@
 # isme.gg
 
-> A peer-to-peer (P2P) streaming app for Android and Android TV. Browse movies, Filipino cinema, TV series, anime and K-drama, and stream media you have permission to watch.
+> A decentralized, ad-free streaming app for Android and Android TV. Watch history and playback settings stay on your device. Browse movies, Filipino cinema, TV series, anime and K-drama, and stream media you have permission to watch.
 
 ## Information
 - [Website](https://bastilavarias.github.io/isme.gg/): product features, supported device targets and category overview.
