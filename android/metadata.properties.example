@@ -1,0 +1,5 @@
+# Copy to metadata.properties (Git ignored). Fill ONE credential locally.
+# The existing 32-character TMDB v3 API key is supported.
+TMDB_API_KEY=
+# Alternatively use the longer API read access token:
+# TMDB_READ_TOKEN=

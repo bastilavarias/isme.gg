@@ -12,7 +12,7 @@ import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
-/** User-supplied read token, encrypted at rest using the device's Android Keystore. */
+/** Build-provided metadata credential, with legacy encrypted local credential fallback. */
 final class MetadataCredential {
     private static final String ALIAS="isme_tmdb_read_v1";
     private static SharedPreferences prefs(Context c){return c.getSharedPreferences("metadata_credential",Context.MODE_PRIVATE);}
@@ -26,6 +26,7 @@ final class MetadataCredential {
         return gen.generateKey();
     }
     static String read(Context c){
+        if(!BuildConfig.TMDB_CREDENTIAL.isEmpty())return BuildConfig.TMDB_CREDENTIAL;
         try{
             String value=prefs(c).getString("cipher","");
             if(value.isEmpty())return "";

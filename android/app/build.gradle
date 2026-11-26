@@ -16,6 +16,19 @@ def releaseKeyPassword = System.getenv("ISME_KEY_PASSWORD") ?: releaseKeys.getPr
 def releaseSigningReady = [releaseStore, releaseStorePassword, releaseAlias, releaseKeyPassword].every { it }
 def releaseAbis = ["arm64-v8a", "armeabi-v7a"]
 
+// Local build configuration is ignored by Git; CI supplies a repository secret.
+// A credential compiled into a public APK is extractable.
+def metadataProperties = new Properties()
+def metadataFile = rootProject.file("metadata.properties")
+if (metadataFile.isFile()) {
+    metadataFile.withInputStream { metadataProperties.load(it) }
+}
+def metadataCredential = (System.getenv("TMDB_READ_TOKEN") ?: System.getenv("TMDB_API_KEY") ?:
+    metadataProperties.getProperty("TMDB_READ_TOKEN") ?: metadataProperties.getProperty("TMDB_API_KEY") ?: "").trim()
+if (metadataCredential && (metadataCredential.length() > 2048 || !(metadataCredential ==~ /[A-Za-z0-9._~+\/-]+=*/))) {
+    throw new GradleException("Invalid TMDB build credential. Check android/metadata.properties or the CI secret.")
+}
+
 android {
     namespace "gg.isme.tv"
     compileSdk 36
@@ -31,6 +44,7 @@ android {
             abiFilters.addAll(releaseAbis)
         }
         buildConfigField "String", "RELEASE_REPO", '""'
+        buildConfigField "String", "TMDB_CREDENTIAL", '"' + metadataCredential + '"'
     }
     buildFeatures { buildConfig true }
     signingConfigs {

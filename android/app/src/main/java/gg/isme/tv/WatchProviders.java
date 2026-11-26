@@ -72,10 +72,16 @@ final class WatchProviders {
 
     static JSONObject get(String path, String token) throws Exception {
         if(token.isEmpty()||token.length()>2048||!token.matches("[A-Za-z0-9._~+/-]+=*"))throw new IOException("Valid TMDB read token required");
-        HttpURLConnection c=(HttpURLConnection)new URL("https://api.themoviedb.org/3"+path).openConnection();
+        // Existing v3 keys use a query parameter; v4 read tokens use Bearer.
+        // Never include the authenticated URL in error messages or logs.
+        boolean apiKey=token.matches("[0-9a-fA-F]{32}");
+        String requestPath=apiKey?path+(path.contains("?")?"&":"?")+"api_key="+token:path;
+        HttpURLConnection c;
+        try{c=(HttpURLConnection)new URL("https://api.themoviedb.org/3"+requestPath).openConnection();}
+        catch(IOException e){throw new IOException("Provider connection failed");}
         c.setInstanceFollowRedirects(false);
         c.setConnectTimeout(8000);c.setReadTimeout(8000);
-        c.setRequestProperty("Authorization","Bearer "+token);
+        if(!apiKey)c.setRequestProperty("Authorization","Bearer "+token);
         c.setRequestProperty("Accept","application/json");
         try {
             int code=c.getResponseCode();
@@ -88,6 +94,11 @@ final class WatchProviders {
                 }
                 return new JSONObject(new String(out.toByteArray(),StandardCharsets.UTF_8));
             }
+        } catch(IOException e){
+            String message=e.getMessage();
+            // Retain only our own sanitized status codes; transport errors may contain URLs.
+            if(message!=null&&message.matches("Provider service HTTP [0-9]{3}|Provider response too large"))throw e;
+            throw new IOException("Provider connection failed");
         } finally {c.disconnect();}
     }
 }

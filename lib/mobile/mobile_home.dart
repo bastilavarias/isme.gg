@@ -205,39 +205,6 @@ class _MobileHomeState extends State<MobileHome>{
     }catch(_){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Title details are unavailable.')));}
     finally{opening=false;if(mounted)setState((){});}
   }
-  Future<void> metadataSettings() async{
-    final country=TextEditingController(text:engine.providerCountry),token=TextEditingController();
-    String? error;
-    final value=await showModalBottomSheet<Map<String,String>>(context:context,isScrollControlled:true,showDragHandle:true,builder:(ctx)=>StatefulBuilder(builder:(ctx,update)=>SafeArea(
-      child:SingleChildScrollView(padding:EdgeInsets.fromLTRB(20,8,20,20+MediaQuery.viewInsetsOf(ctx).bottom),child:Column(
-        mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-          const Text('Streaming availability',style:TextStyle(fontSize:22,fontWeight:FontWeight.w700)),
-          const SizedBox(height:8),const Text('Connect TMDB for live regional platform catalogs. Your token is encrypted on this device.'),
-          const SizedBox(height:16),
-          TextField(controller:country,maxLength:2,textCapitalization:TextCapitalization.characters,decoration:const InputDecoration(labelText:'Country code')),
-          TextField(controller:token,obscureText:true,enableSuggestions:false,autocorrect:false,decoration:InputDecoration(labelText:'TMDB read token',helperText:engine.providersConfigured?'Leave blank to keep the saved token':null)),
-          if(error!=null)Text(error!,style:const TextStyle(color:CinemaColors.accent)),
-          const SizedBox(height:12),
-          FilledButton(onPressed:(){
-            final code=country.text.trim().toUpperCase(),value=token.text.trim();
-            if(!RegExp(r'^[A-Z]{2}$').hasMatch(code)||value.length>2048||(value.isNotEmpty&&!RegExp(r'^[A-Za-z0-9._~+/-]+=*$').hasMatch(value))){update(()=>error='Check the country and token.');return;}
-            Navigator.pop(ctx,{'country':code,if(value.isNotEmpty)'token':value});
-          },child:const Text('Save')),
-          TextButton(onPressed:()=>Navigator.pop(ctx,{'country':engine.providerCountry,'token':''}),child:const Text('Clear token')),
-        ])))));
-    // A sheet can animate after its result completes; defer disposing controllers.
-    Future<void>.delayed(const Duration(milliseconds:400),(){country.dispose();token.dispose();});
-    if(!mounted||value==null)return;
-    await widget.history.prefs.setString('isme-provider-country',value['country']!);
-    if(!mounted)return;
-    try{await engine.configureMetadata(value['country']!,value['token']);}
-    catch(_){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Token could not be saved on this device.')));}
-    if(!mounted)return;
-    revision++;directoryRevision++;
-    setState((){directory=[];artwork=[];shelves.clear();});
-    await loadDirectory(refresh:true);
-    if(mounted&&!filtered)await load(refresh:true);
-  }
   Future<void> settings()=>openSupportMenu(context,engine,()=>showSupportSheet(context,engine));
   Widget chips(List<String> labels,String selected,ValueChanged<String> onChanged)=>SingleChildScrollView(scrollDirection:Axis.horizontal,
     padding:const EdgeInsets.symmetric(horizontal:16),child:Row(children:[
@@ -299,16 +266,16 @@ class _MobileHomeState extends State<MobileHome>{
       ]))),
       if(!busy&&featured.isEmpty)SliverToBoxAdapter(child:MobileEmpty(
         filtered?'No titles available':'Nothing to show yet',
-        filtered&&!engine.providersConfigured?'Connect TMDB in settings to browse this platform.':platformBusy?'Loading availability…':'Try refreshing, or choose another collection.',
-        retry:filtered&&!engine.providersConfigured?metadataSettings:refresh)),
+        platformBusy?'Loading availability…':'Try refreshing, or choose another collection.',
+        retry:refresh)),
       for(final entry in rows.entries)
         if(shelves[entry.key]?.isNotEmpty==true)SliverToBoxAdapter(child:shelf(entry.value,shelves[entry.key]!))
         else if((mainHome||filtered)&&failures.contains(entry.key))SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:TextButton(onPressed:refresh,child:Text('Retry ${entry.value}')))),
       if(mainHome)SliverToBoxAdapter(child:platforms()),
-      if(!filtered&&!mainHome&&(!engine.providersConfigured||(!busy&&failures.isNotEmpty)))SliverToBoxAdapter(child:Padding(
+      if(!filtered&&!mainHome&&!busy&&failures.isNotEmpty)SliverToBoxAdapter(child:Padding(
         padding:const EdgeInsets.fromLTRB(16,8,16,22),child:Align(alignment:Alignment.centerLeft,
-          child:TextButton(onPressed:engine.providersConfigured?refresh:metadataSettings,
-            child:Text(engine.providersConfigured?'Retry catalog':'Enable full catalog'))))),
+          child:TextButton(onPressed:refresh,
+            child:const Text('Retry catalog'))))),
     ]));
   }
   Widget searchPage()=>Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[

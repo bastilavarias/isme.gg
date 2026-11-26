@@ -62,10 +62,17 @@ jobs:
           ISME_KEY_ALIAS: ${{ secrets.ISME_KEY_ALIAS }}
           ISME_KEY_PASSWORD: ${{ secrets.ISME_KEY_PASSWORD }}
           SIGNER_SHA256: ${{ vars.ISME_SIGNER_SHA256 }}
+          TMDB_READ_TOKEN: ${{ secrets.TMDB_READ_TOKEN }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          PUBLISH_RELEASE: ${{ inputs.publish }}
           VERSION: ${{ inputs.version }}
           CODE: ${{ inputs.version_code }}
         run: |
           set -euo pipefail
+          if [ "$PUBLISH_RELEASE" = "true" ] && [ -z "$TMDB_READ_TOKEN" ] && [ -z "$TMDB_API_KEY" ]; then
+            echo "Configure TMDB_API_KEY or TMDB_READ_TOKEN before publishing a public build."
+            exit 1
+          fi
           umask 077
           export ISME_KEYSTORE_PATH="$RUNNER_TEMP/isme-release.jks"
           trap 'rm -f "$ISME_KEYSTORE_PATH"' EXIT

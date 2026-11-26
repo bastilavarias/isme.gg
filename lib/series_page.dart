@@ -92,7 +92,7 @@ class _SeriesPageState extends State<SeriesPage> {
       if(list.isEmpty){setState((){_loading=false;_error='No season information available.';});return;}
       await _chooseSeason(list.firstWhere((s)=>s.number>0,orElse:()=>list.first).number);
     }catch(_){
-      if(mounted&&run==_generation)setState((){_loading=false;_error='Season information unavailable. Connect TMDB or try again.';});
+      if(mounted&&run==_generation)setState((){_loading=false;_error='Season information unavailable. Try again.';});
     }
   }
   Future<void> _chooseSeason(int number,{bool focusEpisodes=false}) async {
@@ -110,7 +110,7 @@ class _SeriesPageState extends State<SeriesPage> {
         if(mounted&&run==_generation)_focusEpisode(0);
       });
     }catch(_){
-      if(mounted&&run==_generation)setState((){_loading=false;_error='Episodes unavailable. Connect TMDB or try again.';});
+      if(mounted&&run==_generation)setState((){_loading=false;_error='Episodes unavailable. Try again.';});
     }
   }
   KeyEventResult _seasonKeys(FocusNode node,KeyEvent event){

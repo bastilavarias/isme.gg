@@ -394,53 +394,6 @@ class _CinemaHomeState extends State<CinemaHome> {
       items:supportMenuItems(engine)));
     if(mounted)menuNav.requestFocus();
   }
-  Future<void> providerSettings() async {
-    final region=TextEditingController(text:engine.providerCountry);
-    final token=TextEditingController();
-    String? validation;
-    final value=await showDialog<Map<String,String>>(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,update)=>AlertDialog(
-      title:const Text('Streaming availability'),
-      content:SingleChildScrollView(child:SizedBox(width:390,child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
-        const Text('Connect TMDB for TV series, anime, episode artwork and regional streaming badges.'),
-        const SizedBox(height:12),
-        TextField(controller:region,maxLength:2,textCapitalization:TextCapitalization.characters,decoration:const InputDecoration(labelText:'Country code (e.g. PH, US)')),
-        TextField(controller:token,obscureText:true,enableSuggestions:false,autocorrect:false,decoration:const InputDecoration(labelText:'TMDB API read access token')),
-        const SizedBox(height:8),
-        Text(engine.providersConfigured?'A read token is configured. Leave the field blank to keep it.':'Enter a TMDB API read token once to enable live platform browsing.'),
-        const Text('Your token is encrypted on this device using Android Keystore. Data from JustWatch via TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.',style:TextStyle(fontSize:12,color:CinemaColors.muted)),
-        if(validation!=null)Text(validation!,style:const TextStyle(color:CinemaColors.accent)),
-      ]))),
-      actions:[
-        TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Cancel')),
-        TextButton(onPressed:()=>Navigator.pop(ctx,{'country':engine.providerCountry,'token':''}),child:const Text('Clear token')),
-        FilledButton(onPressed:(){
-          final code=region.text.trim().toUpperCase(),readToken=token.text.trim();
-          if(!RegExp(r'^[A-Z]{2}$').hasMatch(code)||readToken.length>2048||(readToken.isNotEmpty&&!RegExp(r'^[A-Za-z0-9._~+/-]+=*$').hasMatch(readToken))){update(()=>validation='Enter a valid country code and read token.');return;}
-          Navigator.pop(ctx,{'country':code,if(readToken.isNotEmpty)'token':readToken});
-        },child:const Text('Apply')),
-      ],
-    )));
-    region.dispose();token.dispose();
-    if(!mounted||value==null)return;
-    final country=value['country']!;
-    await widget.history.prefs.setString('isme-provider-country',country);
-    if(!mounted)return;
-    try{await engine.configureMetadata(country,value['token']);}catch(_){
-      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Token is active for this session but could not be saved.')));
-    }
-    if(!mounted)return;
-    catalogGeneration++;
-    setState((){
-      platformDirectory=[];
-      shelves.removeWhere((key,_)=>key.startsWith('platform:'));
-      failures.clear();
-    });
-    selected.value=null;
-    menuNav.requestFocus();
-    await loadPlatforms(force:true);
-    if(mounted&&!filtered)await load(force:true);
-    if(mounted&&searching&&search.text.trim().isNotEmpty)query(search.text);
-  }
   Widget navDivider()=>Padding(
     padding:EdgeInsets.symmetric(horizontal:engine.tv?9:5),
     child:ExcludeSemantics(child:Container(width:1,height:19,color:const Color(0x26F5F1EB))));
@@ -486,17 +439,17 @@ class _CinemaHomeState extends State<CinemaHome> {
       if(continued.isNotEmpty)shelf('Continue watching',continued,tv),
       if(filtered&&!loading&&(collections.isEmpty||!collections.keys.any((k)=>shelves[k]?.isNotEmpty==true)))Padding(
         padding:EdgeInsets.symmetric(horizontal:tv?40:16,vertical:16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-          Text(platformBusy?'Loading platforms…':!engine.providersConfigured?'Connect TMDB in settings to explore ${platform.name}.':platformError??'No catalog available for ${platform.name} in ${engine.providerCountry}.',style:const TextStyle(color:CinemaColors.muted)),
+          Text(platformBusy?'Loading platforms…':'No catalog available for ${platform.name} right now.',style:const TextStyle(color:CinemaColors.muted)),
           if(!platformBusy)Focus(canRequestFocus:false,onKeyEvent:(_,event){
             if(tv&&event is KeyDownEvent&&event.logicalKey==LogicalKeyboardKey.arrowUp){platformRailKey.currentState?.focusRemembered();return KeyEventResult.handled;}
             return KeyEventResult.ignored;
-          },child:TextButton(focusNode:platformStatusFocus,onPressed:engine.providersConfigured?()=>loadPlatforms(force:true):providerSettings,child:Text(engine.providersConfigured?'Refresh platforms':'Metadata settings'))),
+          },child:TextButton(focusNode:platformStatusFocus,onPressed:()=>loadPlatforms(force:true),child:const Text('Refresh platforms'))),
         ])),
       for(final entry in collections.entries)
         if(shelves[entry.key]?.isNotEmpty==true)shelf(entry.value,shelves[entry.key]!,tv)
         else if((mainHome||filtered)&&failures.containsKey(entry.key))Padding(padding:const EdgeInsets.all(16),child:TextButton(onPressed:()=>load(force:true),child:Text('Retry ${entry.value}'))),
       if(mainHome)platformRow(tv),
-      if(!filtered&&!mainHome&&(!engine.providersConfigured||(!loading&&(failures.isNotEmpty||!collections.keys.any((k)=>shelves[k]?.isNotEmpty==true)))))
+      if(!filtered&&!mainHome&&!loading&&(failures.isNotEmpty||!collections.keys.any((k)=>shelves[k]?.isNotEmpty==true)))
         Padding(padding:const EdgeInsets.fromLTRB(40,8,40,28),child:Align(alignment:Alignment.centerLeft,
           child:Focus(canRequestFocus:false,onKeyEvent:(_,event){
             if(event is KeyDownEvent&&event.logicalKey==LogicalKeyboardKey.arrowUp){
@@ -506,8 +459,8 @@ class _CinemaHomeState extends State<CinemaHome> {
             }
             return KeyEventResult.ignored;
           },child:TextButton(focusNode:platformStatusFocus,
-            onPressed:engine.providersConfigured?()=>load(force:true):providerSettings,
-            child:Text(engine.providersConfigured?'Retry catalog':'Enable full catalog'))))),
+            onPressed:()=>load(force:true),
+            child:const Text('Retry catalog'))))),
     ]));
   Widget hero(Movie m,bool tv)=>Stack(children:[
     if(!tv) Positioned.fill(child:Stack(fit:StackFit.expand,children:[
