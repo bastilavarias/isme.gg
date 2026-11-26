@@ -21,11 +21,18 @@ void main(){
     expect(gate.accept(),isTrue);
   });
 
-  test('player Back hides active controls before leaving playback',(){
-    expect(backHidesPlaybackControls(controlsVisible:true,playbackReady:true),isTrue);
-    expect(backHidesPlaybackControls(controlsVisible:false,playbackReady:true),isFalse);
-    expect(backHidesPlaybackControls(controlsVisible:true,playbackReady:false),isFalse);
-    expect(backHidesPlaybackControls(controlsVisible:false,playbackReady:false),isFalse);
+  test('TV Back hides active controls before leaving playback',(){
+    expect(backHidesPlaybackControls(tv:true,controlsVisible:true,playbackReady:true),isTrue);
+    expect(backHidesPlaybackControls(tv:true,controlsVisible:false,playbackReady:true),isFalse);
+    expect(backHidesPlaybackControls(tv:true,controlsVisible:true,playbackReady:false),isFalse);
+    expect(backHidesPlaybackControls(tv:true,controlsVisible:false,playbackReady:false),isFalse);
+  });
+  test('mobile Back leaves regardless of controls or playback readiness',(){
+    for(final controls in [true,false]){
+      for(final ready in [true,false]){
+        expect(backHidesPlaybackControls(tv:false,controlsVisible:controls,playbackReady:ready),isFalse);
+      }
+    }
   });
 
   test('exit counter needs three presses inside a short window',(){

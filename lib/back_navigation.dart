@@ -56,10 +56,10 @@ class BackNavigationScope extends StatelessWidget {
     },child:child));
 }
 
-/// During playback, Back dismisses visible controls before leaving the route.
-/// Loading and error screens must still be cancellable in one press.
-bool backHidesPlaybackControls({required bool controlsVisible,required bool playbackReady})=>
-  controlsVisible&&playbackReady;
+/// TV remote Back dismisses visible controls first. Mobile Back always
+/// leaves the player; touch controls have their own tap-to-hide gesture.
+bool backHidesPlaybackControls({required bool tv,required bool controlsVisible,required bool playbackReady})=>
+  tv&&controlsVisible&&playbackReady;
 
 class ExitPressCounter {
   final Duration window;

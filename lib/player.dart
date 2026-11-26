@@ -434,7 +434,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   void handleBack(){
     if(!currentRoute||settingsOpen)return;
-    if(backHidesPlaybackControls(controlsVisible:controls,
+    if(backHidesPlaybackControls(tv:widget.engine.tv,controlsVisible:controls,
         playbackReady:player?.value.isInitialized==true&&!busy&&error==null)){
       hideControls();
       return;
@@ -906,7 +906,10 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
             colors:[Color(0xDD000000),Colors.transparent])),
           padding:EdgeInsets.fromLTRB(widget.engine.tv?24:8,8,widget.engine.tv?24:8,22),
           child:Row(children:[
-            controlButton(backFocus,'Back',Icons.arrow_back,()=>Navigator.maybePop(context),compact:true),
+            controlButton(backFocus,'Back',Icons.arrow_back,(){
+              if(widget.engine.tv){Navigator.maybePop(context);}
+              else{unawaited(leave());}
+            },compact:true),
             Expanded(child:Text(_movie.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:20,fontWeight:FontWeight.w600))),
             if(!widget.engine.tv&&c!=null)_touchButton('Lock controls',Icons.lock_open,_toggleLock),
             if(kDebugMode&&widget.engine.tv)controlButton(debugFocus,'Playback diagnostics',Icons.bug_report_outlined,showDiagnostics,compact:true),
