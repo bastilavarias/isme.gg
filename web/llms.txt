@@ -1,9 +1,10 @@
 # isme.gg
 
-> A cinema-first media app for Android and Android TV, designed for discovering movies, Filipino cinema, TV series, anime and K-drama and playing authorized media.
+> A peer-to-peer (P2P) streaming app for Android and Android TV. Browse movies, Filipino cinema, TV series, anime and K-drama, and stream media you have permission to watch.
 
 ## Information
 - [Website](https://bastilavarias.github.io/isme.gg/): product features, supported device targets and category overview.
+- [How P2P streaming works](https://bastilavarias.github.io/isme.gg/#technology) explains BitTorrent playback, the token-protected on-device connection and HTTPS encryption for catalog requests.
 - [FAQ](https://bastilavarias.github.io/isme.gg/#faq): content availability, privacy, platform support and advertising.
 - [Project releases](https://github.com/bastilavarias/isme.gg/releases): available builds and release details.
 
