@@ -12,7 +12,7 @@ class MobileTestEngine extends NativeEngine{
   static const film=Movie(id:'imdb:tt1234567',title:'Example film');
   static const show=Movie(id:'imdb:tt1234568',title:'Example series',type:'Series');
   @override Future<CatalogSnapshot> catalogSnapshot(String collection,{String mode='normal',String query=''}) async=>
-    CatalogSnapshot(collection=='trending'?[film]:collection=='series'?[show]:[],cacheHit:true,stale:false);
+    CatalogSnapshot(['trending','weekly_movies'].contains(collection)?[film]:['series','weekly_tv'].contains(collection)?[show]:[],cacheHit:true,stale:false);
   @override Future<List<WatchProvider>> watchPlatforms({String mode='normal',bool artworkOnly=false})async=>[];
   @override Future<String?> providerFor(Movie movie) async=>null;
   @override Future<List<Season>> seasons(Movie show) async=>const [Season(1,'Season 1'),Season(2,'Season 2')];
@@ -51,6 +51,8 @@ void main(){
     expect(find.text('My List'),findsNothing);
     expect(find.byKey(const ValueKey('mobile-bottom-nav')),findsOneWidget);
     expect(find.byKey(const ValueKey('mobile-side-nav')),findsNothing);
+    await tester.scrollUntilVisible(find.text('Explore platforms'),240,
+      scrollable:find.descendant(of:find.byKey(const PageStorageKey('mobile-home')),matching:find.byType(Scrollable)).first);
     expect(find.text('Explore platforms'),findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('mobile-nav-Search')));await tester.pumpAndSettle();
     expect(find.byType(TextField),findsOneWidget);
@@ -63,6 +65,8 @@ void main(){
     await tester.tap(find.byKey(const ValueKey('mobile-nav-Pinoy')));await tester.pumpAndSettle();
     expect(find.text('Explore platforms'),findsNothing);
     await tester.tap(find.byKey(const ValueKey('mobile-nav-Home')));await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Explore platforms'),200,
+      scrollable:find.descendant(of:find.byKey(const PageStorageKey('mobile-home')),matching:find.byType(Scrollable)).first);
     expect(find.text('Explore platforms'),findsOneWidget);
     expect(tester.takeException(),isNull);
     await tester.pumpWidget(const SizedBox.shrink());

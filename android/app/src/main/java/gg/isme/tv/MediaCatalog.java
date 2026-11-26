@@ -58,6 +58,8 @@ final class MediaCatalog {
                 case "action": suffix = "top/genre=Action"; break;
                 case "scifi": suffix = "top/genre=Sci-Fi"; break;
                 case "horror": suffix = "top/genre=Horror"; break;
+                case "comedy": suffix = "top/genre=Comedy"; break;
+                case "romance": suffix = "top/genre=Romance"; break;
                 case "top_rated": suffix = "imdbRating"; break;
                 // TMDB snapshots generated with authenticated build tools, not on the TV.
                 // Each entry carries IMDb ID so the local torrent engine can resolve it.
@@ -90,6 +92,7 @@ final class MediaCatalog {
                 ? Integer.parseInt(meta.optString("releaseInfo").substring(0, 4)) : JSONObject.NULL);
             movie.put("poster", meta.optString("poster", ""));
             movie.put("backdrop", meta.optString("background", ""));
+            if(!meta.isNull("imdbRating"))movie.put("ratingLabel",meta.optString("imdbRating",""));
             movie.put("available", false);
             items.put(movie);
         }

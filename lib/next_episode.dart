@@ -36,14 +36,14 @@ class EpisodeIdentity {
     return EpisodeIdentity(m.group(1)!,int.parse(m.group(2)!),int.parse(m.group(3)!));
   }
   Movie parent(Movie movie)=>Movie(id:parentId,title:movie.title.replaceFirst(RegExp(r' · S[0-9]+ E[0-9]+$'),''),
-    type:movie.type,poster:movie.poster,tmdbId:movie.tmdbId);
+    type:movie.type,poster:movie.poster,tmdbId:movie.tmdbId,pinoy:movie.pinoy,animeFilm:movie.animeFilm);
 }
 
 Movie episodeMovie(Movie show,int season,Episode episode)=>Movie(
   id:'${show.id}:s$season:e${episode.number}',
   title:'${show.title} · S$season E${episode.number}',type:show.type,
   poster:show.poster,backdrop:episode.thumbnail.isEmpty?show.art:episode.thumbnail,
-  description:episode.description,episodeTitle:episode.title,tmdbId:show.tmdbId);
+  description:episode.description,episodeTitle:episode.title,tmdbId:show.tmdbId,pinoy:show.pinoy,animeFilm:show.animeFilm);
 
 bool aired(Episode ep,DateTime now){
   final date=DateTime.tryParse(ep.airDate);

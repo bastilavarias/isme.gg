@@ -34,6 +34,7 @@ final class LocalCinemaServer {
     private final WatchProviders providers;
     private final SeriesCatalog series;
     private final PlatformCatalog platforms;
+    private final HomeCatalog home;
     private final SubtitleSupport subtitles = new SubtitleSupport();
     private final ExecutorService workers = Executors.newFixedThreadPool(8);
     private final ServerSocket listener;
@@ -49,6 +50,7 @@ final class LocalCinemaServer {
         this.providers = new WatchProviders(metadata);
         this.series = new SeriesCatalog(metadata);
         this.platforms = new PlatformCatalog(metadata);
+        this.home = new HomeCatalog(metadata);
         listener = new ServerSocket();
         // Fixed only in explicit debug mode so Windows adb forward can access the
         // on-device torrent API without rebuilding the APK for Vite changes.
@@ -141,6 +143,10 @@ final class LocalCinemaServer {
             if (path.equals("/api/catalog") && method.equals("GET")) {
                 sendJson(out, 200, metadata.catalog(context, query.getOrDefault("collection", "trending"),
                     query.getOrDefault("query", ""), query.getOrDefault("mode", "normal"))); return;
+            }
+            if (path.equals("/api/home/catalog") && method.equals("POST")) {
+                JSONObject body=new JSONObject(new String(data,StandardCharsets.UTF_8));
+                sendJson(out,200,home.catalog(body.optString("collection",""),body.optString("mode","normal"),body.optString("token","")));return;
             }
             if (path.equals("/api/providers") && method.equals("POST")) {
                 JSONObject body = new JSONObject(new String(data, StandardCharsets.UTF_8));

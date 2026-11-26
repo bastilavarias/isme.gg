@@ -5,6 +5,8 @@ import '../engine.dart';
 import '../platform_rail.dart';
 import '../player.dart';
 import '../support_menu.dart';
+import '../home_sections.dart';
+import '../category_catalog.dart';
 import 'mobile_details.dart';
 import 'mobile_library.dart';
 import 'mobile_widgets.dart';
@@ -16,14 +18,12 @@ class MobileHome extends StatefulWidget{
   @override State<MobileHome> createState()=>_MobileHomeState();
 }
 class _MobileHomeState extends State<MobileHome>{
-  static const categories=['Home','Movies','TV Series','Anime','Pinoy'];
-  static const baseRows={
-    'trending':'Trending movies','series':'Popular series','anime':'Popular anime',
-    'pinoy':'Filipino movies','korean':'Korean movies','action':'Action movies','horror':'Horror movies',
-  };
+  static const categories=categoryNames;
+  final verifiedWeekly=<String>{};
+  bool get mainHome=>category=='Home'&&!filtered;
   final shelves=<String,List<Movie>>{};
   final failures=<String>{};
-  final homeScroll=ScrollController(),searchScroll=ScrollController();
+  final homeScroll=ScrollController(keepScrollOffset:false),searchScroll=ScrollController();
   final query=TextEditingController();
   final searchFocus=FocusNode();
   final pageStorage=PageStorageBucket();
@@ -52,13 +52,7 @@ class _MobileHomeState extends State<MobileHome>{
         if(tv)'tv:rated':'Top rated series',
       };
     }
-    return switch(category){
-      'Movies'=>{'trending':'Trending movies','pinoy':'Filipino movies','korean':'Korean movies','english':'English movies','action':'Action movies','horror':'Horror movies','scifi':'Sci-fi movies','top_rated':'Top rated movies'},
-      'TV Series'=>{'series':'Popular series','series_rated':'Top rated series'},
-      'Anime'=>{'anime':'Popular anime','anime_rated':'Top rated anime'},
-      'Pinoy'=>{'pinoy':'Filipino movies',if(engine.providersConfigured)'series_pinoy':'Filipino TV series'},
-      _=>baseRows,
-    };
+    return categorySections(category,verifiedWeekly);
   }
   @override void initState(){
     super.initState();library=MobileLibrary(widget.history);
@@ -96,6 +90,10 @@ class _MobileHomeState extends State<MobileHome>{
     final n=++revision,requested=Map<String,String>.of(rows);
     final brand=filtered?platform:PlatformBrand.all,providers=List<WatchProvider>.of(directory);
     bool current()=>mounted&&revision==n;
+    void apply(String key,CatalogSnapshot data){
+      if(!current())return;
+      setState((){if(!filtered)rememberWeekly(verifiedWeekly,key,data);shelves[key]=filtered?data.movies:sectionMovies(key,data);});
+    }
     setState((){busy=true;failures.clear();shelves.removeWhere((key,_)=>!requested.containsKey(key));});
     Future<CatalogSnapshot> snapshot(String key,String mode){
       if(brand.key=='all')return engine.catalogSnapshot(key,mode:mode);
@@ -103,20 +101,27 @@ class _MobileHomeState extends State<MobileHome>{
       final ids=brand.matches(providers).where((p)=>parts[0]=='movie'?p.movie:p.tv).map((p)=>p.id).toList();
       return engine.platformCatalog(ids,parts[0],parts[1],mode:mode);
     }
-    // Bound live fan-out to two rows at a time; cache renders independently.
+    // Show cached catalog immediately, then load missing/stale rows in pairs.
     final keys=requested.keys.toList();
+    final saved=<String,CatalogSnapshot>{};
+    for(var i=0;i<keys.length;i+=4){
+      if(!current())return;
+      await Future.wait(keys.skip(i).take(4).map((key)async{
+        try{
+          final data=await snapshot(key,'cached');
+          if(!current())return;
+          saved[key]=data;
+          if(data.movies.isNotEmpty)apply(key,data);
+        }catch(_){}
+      }));
+    }
     for(var i=0;i<keys.length;i+=2){
       if(!current())return;
       await Future.wait(keys.skip(i).take(2).map((key)async{
-        CatalogSnapshot? saved;
-        try{
-          saved=await snapshot(key,'cached');
-          if(current()&&saved.movies.isNotEmpty){final items=saved.movies;setState(()=>shelves[key]=items);}
-        }catch(_){}
-        if(!current()||(!refresh&&saved?.cacheHit==true&&saved?.stale==false))return;
+        if(!current()||(!refresh&&saved[key]?.cacheHit==true&&saved[key]?.stale==false))return;
         try{
           final data=await snapshot(key,refresh?'refresh':'normal');
-          if(current())setState(()=>shelves[key]=data.movies);
+          apply(key,data);
         }catch(_){if(current()&&shelves[key]?.isNotEmpty!=true)setState(()=>failures.add(key));}
       }));
     }
@@ -128,13 +133,16 @@ class _MobileHomeState extends State<MobileHome>{
   }
   void setCategory(String value){
     FocusManager.instance.primaryFocus?.unfocus();
-    if(category==value&&tab==0){if(homeScroll.hasClients)homeScroll.jumpTo(0);return;}
-    setState((){
-      if(value!=category)shelves.clear();
-      category=value;tab=0;
-
-    });
+    if(category==value&&tab==0&&!filtered){if(homeScroll.hasClients)homeScroll.jumpTo(0);return;}
+    revision++;
     if(homeScroll.hasClients)homeScroll.jumpTo(0);
+    setState((){
+      category=value;tab=0;platform=PlatformBrand.all;busy=true;failures.clear();
+      shelves.removeWhere((key,_)=>!rows.containsKey(key));
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_){
+      if(mounted&&tab==0&&category==value&&homeScroll.hasClients)homeScroll.jumpTo(0);
+    });
     unawaited(load());
   }
   void selectPlatform(PlatformBrand brand){
@@ -155,7 +163,7 @@ class _MobileHomeState extends State<MobileHome>{
   List<Movie> get searchItems{
     final items=query.text.trim().isEmpty?popular:results;
     return items.where((m)=>switch(searchCategory){
-      'Movies'=>!m.episodic,'TV Series'=>m.type=='Series','Anime'=>m.type=='Anime',_=>true,
+      'Movies'=>!m.episodic,'TV Series'=>m.type=='Series','Anime'=>m.type=='Anime'||m.animeFilm,_=>true,
     }).toList();
   }
   void search(String value){
@@ -239,20 +247,19 @@ class _MobileHomeState extends State<MobileHome>{
     ]));
   Widget heading(String title)=>Padding(padding:const EdgeInsets.symmetric(horizontal:16,vertical:8),
     child:Text(title,style:const TextStyle(fontSize:19,fontWeight:FontWeight.w700)));
-  List<Movie> get continued=>library.recent.where((m)=>category=='Home'||
-    (category=='Movies'&&!m.episodic)||(category=='TV Series'&&m.type=='Series')||
-    (category=='Anime'&&m.type=='Anime')||(category=='Pinoy'&&
-      [...?shelves['pinoy'],...?shelves['series_pinoy']].any((title)=>m.id==title.id||m.id.startsWith('${title.id}:s')))).toList();
+  List<Movie> get continued=>library.recent.where((m)=>belongsToCategory(m,category,
+    shelves.values.expand((row)=>row))).toList();
   Widget shelf(String title,List<Movie> items)=>Padding(padding:const EdgeInsets.only(bottom:18),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     heading(title),
     const SizedBox(height:5),
     LayoutBuilder(builder:(ctx,box){
       final width=(box.maxWidth/3.35).clamp(92.0,142.0).toDouble();
+      final ranked=isRankedSection(title);
       return SizedBox(height:width*1.5+23,child:ListView.separated(
         key:PageStorageKey('mobile-$category-${platform.key}-$title'),scrollDirection:Axis.horizontal,
         padding:const EdgeInsets.symmetric(horizontal:16),itemCount:items.length,
         separatorBuilder:(_,__)=>const SizedBox(width:10),
-        itemBuilder:(_,i)=>SizedBox(width:width,child:MobilePoster(movie:items[i],engine:engine,onTap:()=>open(items[i])))));
+        itemBuilder:(_,i)=>SizedBox(width:ranked?width*1.52:width,child:MobilePoster(movie:items[i],engine:engine,rank:ranked?i+1:null,onTap:()=>open(items[i])))));
     }),
   ]));
   Widget resumeShelf(){
@@ -268,7 +275,7 @@ class _MobileHomeState extends State<MobileHome>{
               CinemaArt(m.art,cacheWidth:480),const Center(child:Icon(Icons.play_circle_outline,size:32)),
               if(progress!=null)Align(alignment:Alignment.bottomCenter,child:LinearProgressIndicator(value:progress,minHeight:3)),
             ]))),
-            const SizedBox(height:5),Text(m.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:12)),
+            const SizedBox(height:5),Text(resumeTitle(m),maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:12)),
             Text('${library.history.position(m).inMinutes} min watched',style:const TextStyle(fontSize:10,color:CinemaColors.muted)),
           ])));
         })),
@@ -276,11 +283,15 @@ class _MobileHomeState extends State<MobileHome>{
   }
   Widget platforms()=>PlatformRail(providers:[...directory,...artwork],selected:platform,onSelected:selectPlatform,onUp:(){},onDown:(){},tv:false);
   Widget home(){
-    final featured=unique(rows.keys.expand((k)=>shelves[k]??[]),limit:4);
+    final candidates=rows.keys.expand((k)=>shelves[k]??<Movie>[]);
+    final picked=filtered?unique(candidates,limit:4):featuredToday(candidates);
+    final featured=picked.isEmpty?unique(candidates,limit:4):picked;
     return RefreshIndicator(onRefresh:refresh,child:CustomScrollView(key:const PageStorageKey('mobile-home'),controller:homeScroll,physics:const AlwaysScrollableScrollPhysics(),slivers:[
-      if(featured.isNotEmpty)SliverToBoxAdapter(child:_Featured(key:PageStorageKey('$category:${platform.key}'),movies:featured,onOpen:open)),
+      if(!filtered&&!mainHome)SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.fromLTRB(16,10,16,0),
+        child:Text(category,key:const ValueKey('mobile-catalog-heading'),style:const TextStyle(fontSize:25,fontWeight:FontWeight.w800)))),
+      if(featured.isNotEmpty)SliverToBoxAdapter(child:_Featured(key:PageStorageKey('$category:${platform.key}'),movies:featured,onOpen:open,featureLabel:filtered?'':categoryFeature(category))),
       if(busy)const SliverToBoxAdapter(child:LinearProgressIndicator(minHeight:2)),
-      if(category=='Home')SliverToBoxAdapter(child:platforms()),
+      if(filtered)SliverToBoxAdapter(child:platforms()),
       if(continued.isNotEmpty)SliverToBoxAdapter(child:resumeShelf()),
       if(filtered)SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.fromLTRB(16,4,16,12),child:Row(children:[
         Expanded(child:Text('Explore ${platform.name}',style:const TextStyle(fontSize:20,fontWeight:FontWeight.w700))),
@@ -292,8 +303,12 @@ class _MobileHomeState extends State<MobileHome>{
         retry:filtered&&!engine.providersConfigured?metadataSettings:refresh)),
       for(final entry in rows.entries)
         if(shelves[entry.key]?.isNotEmpty==true)SliverToBoxAdapter(child:shelf(entry.value,shelves[entry.key]!))
-        else if(failures.contains(entry.key))SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:TextButton(onPressed:refresh,child:Text('Retry ${entry.value}')))),
-      const SliverToBoxAdapter(child:Padding(padding:EdgeInsets.all(16),child:Text('Metadata and artwork: TMDB · Availability: JustWatch',style:TextStyle(fontSize:10,color:CinemaColors.muted)))),
+        else if((mainHome||filtered)&&failures.contains(entry.key))SliverToBoxAdapter(child:Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:TextButton(onPressed:refresh,child:Text('Retry ${entry.value}')))),
+      if(mainHome)SliverToBoxAdapter(child:platforms()),
+      if(!filtered&&!mainHome&&(!engine.providersConfigured||(!busy&&failures.isNotEmpty)))SliverToBoxAdapter(child:Padding(
+        padding:const EdgeInsets.fromLTRB(16,8,16,22),child:Align(alignment:Alignment.centerLeft,
+          child:TextButton(onPressed:engine.providersConfigured?refresh:metadataSettings,
+            child:Text(engine.providersConfigured?'Retry catalog':'Enable full catalog'))))),
     ]));
   }
   Widget searchPage()=>Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
@@ -377,7 +392,7 @@ class _MobileHomeState extends State<MobileHome>{
           color:tab==1?CinemaColors.accent:CinemaColors.ink),
         IconButton(tooltip:'Menu',onPressed:settings,icon:const Icon(Icons.more_vert)),
       ])),
-      Expanded(child:PageStorage(bucket:pageStorage,child:KeyedSubtree(key:ValueKey(tab),child:page))),
+      Expanded(child:PageStorage(bucket:pageStorage,child:KeyedSubtree(key:ValueKey('$tab:$category:${platform.key}'),child:page))),
     ]);
     return Scaffold(
       body:SafeArea(bottom:landscape||keyboard,child:Row(children:[
@@ -391,7 +406,8 @@ class _MobileHomeState extends State<MobileHome>{
 class _Featured extends StatefulWidget{
   final List<Movie> movies;
   final ValueChanged<Movie> onOpen;
-  const _Featured({super.key,required this.movies,required this.onOpen});
+  final String featureLabel;
+  const _Featured({super.key,required this.movies,required this.onOpen,this.featureLabel=''});
   @override State<_Featured> createState()=>_FeaturedState();
 }
 class _FeaturedState extends State<_Featured>{
@@ -415,8 +431,10 @@ class _FeaturedState extends State<_Featured>{
             const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,
               colors:[Colors.transparent,Color(0x22000000),Color(0xEE11110F)],stops:[0,.35,1]))),
             Align(alignment:Alignment.bottomLeft,child:Padding(padding:const EdgeInsets.all(16),child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+              if(widget.featureLabel.isNotEmpty)Padding(padding:const EdgeInsets.only(bottom:5),child:Text(widget.featureLabel,style:const TextStyle(color:CinemaColors.accent,fontSize:10,letterSpacing:1.2,fontWeight:FontWeight.w700))),
               Text(m.title,maxLines:2,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:27,fontWeight:FontWeight.w800,height:1.1)),
               const SizedBox(height:6),Text(m.metadata,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(color:CinemaColors.muted,fontSize:11)),
+              if(m.description.isNotEmpty&&!landscape)Padding(padding:const EdgeInsets.only(top:5),child:Text(m.description,maxLines:2,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:11))),
               const SizedBox(height:12),FilledButton.icon(onPressed:()=>widget.onOpen(m),icon:const Icon(Icons.play_arrow),label:Text(m.episodic?'Episodes':'Watch now')),
             ]))),
           ]);

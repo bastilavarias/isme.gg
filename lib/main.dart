@@ -12,6 +12,8 @@ import 'series_page.dart';
 import 'platform_rail.dart';
 import 'mobile/mobile_home.dart';
 import 'support_menu.dart';
+import 'home_sections.dart';
+import 'category_catalog.dart';
 
 void main(){ WidgetsFlutterBinding.ensureInitialized(); PaintingBinding.instance.imageCache.maximumSizeBytes=48*1024*1024; PaintingBinding.instance.imageCache.maximumSize=120; runApp(const IsmeApp()); }
 class IsmeApp extends StatefulWidget {
@@ -45,10 +47,10 @@ class CinemaHome extends StatefulWidget {
   @override State<CinemaHome> createState()=>_CinemaHomeState();
 }
 class _CinemaHomeState extends State<CinemaHome> {
-  static const movieCollections={'trending':'Trending movies','pinoy':'Filipino movies','korean':'Korean movies','english':'English movies','action':'Action movies','horror':'Horror movies','scifi':'Sci-fi movies','top_rated':'Top rated movies'};
-  static const seriesCollections={'series':'Popular series','series_rated':'Top rated series'};
-  static const animeCollections={'anime':'Popular anime','anime_rated':'Top rated anime'};
   String section='Home';
+  final verifiedWeekly=<String>{};
+  String? featuredId;
+  bool get mainHome=>section=='Home'&&!filtered;
   PlatformBrand platform=PlatformBrand.all;
   List<WatchProvider> platformDirectory=[],platformArtwork=[];
   final platformStatusFocus=FocusNode(debugLabel:'Platform catalog action');
@@ -72,11 +74,7 @@ class _CinemaHomeState extends State<CinemaHome> {
         if(tv)'${prefix}tv:rated':'Top rated series',
       };
     }
-    return switch(section){
-      'Home'=>{'trending':'Trending movies','series':'Popular series','anime':'Popular anime','pinoy':'Filipino movies','korean':'Korean movies','action':'Action movies','horror':'Horror movies'},
-      'Series'=>seriesCollections,'Anime'=>animeCollections,
-      'Pinoy'=>{'pinoy':'Filipino movies',if(engine.providersConfigured)'series_pinoy':'Filipino TV series'},_=>movieCollections,
-    };
+    return categorySections(section,verifiedWeekly);
   }
   Future<CatalogSnapshot> shelfSnapshot(String key,{String mode='normal'}) async {
     if(!key.startsWith('platform:'))return engine.catalogSnapshot(key,mode:mode);
@@ -123,18 +121,20 @@ class _CinemaHomeState extends State<CinemaHome> {
       shelves.removeWhere((key,_)=>key.startsWith('platform:')&&!key.startsWith('platform:${next.key}:'));
     });
     selected.value=collections.keys.expand((k)=>shelves[k]??<Movie>[]).firstOrNull;
-    load();
+    scrollTop();load();
   }
   void focusFirstShelf(){
     final rows=visibleRows;
     if(rows.isNotEmpty)rowKeys[rows.first]?.currentState?.focusRemembered();
     else if(platformStatusFocus.context!=null)platformStatusFocus.requestFocus();
+    else if(mainHome)platformRailKey.currentState?.focusRemembered();
   }
-  List<Movie> get continued=>widget.history.movies().where((m)=>section=='Home'||(section=='Movies'&&!m.episodic)||(section=='Series'&&m.type=='Series')||(section=='Anime'&&m.type=='Anime')||(section=='Pinoy'&&[...?shelves['pinoy'],...?shelves['series_pinoy']].any((title)=>m.id==title.id||m.id.startsWith('${title.id}:s')))).toList();
+  List<Movie> get continued=>widget.history.movies().where((m)=>belongsToCategory(m,section,
+    shelves.values.expand((row)=>row))).toList();
   final shelves=<String,List<Movie>>{}, failures=<String,String>{};
   final selected=ValueNotifier<Movie?>(null);
   final search=TextEditingController();
-  final homeScroll=ScrollController();
+  final homeScroll=ScrollController(keepScrollOffset:false);
   final homeNav=FocusNode(debugLabel:'Home'), searchNav=FocusNode(debugLabel:'Search'),
     menuNav=FocusNode(debugLabel:'Menu'), heroFocus=FocusNode(debugLabel:'Hero watch');
   final movieNav=FocusNode(debugLabel:'Movies'),seriesNav=FocusNode(debugLabel:'TV Series'),animeNav=FocusNode(debugLabel:'Anime'),pinoyNav=FocusNode(debugLabel:'Pinoy');
@@ -161,18 +161,32 @@ class _CinemaHomeState extends State<CinemaHome> {
   }
   void moveRow(String name,bool down){
     final rows=visibleRows;final i=rows.indexOf(name)+(down?1:-1);
-    if(i<0){if(section=='Home'){platformRailKey.currentState?.focusRemembered();}else{focusHero();}return;}
+    if(i<0){if(filtered){platformRailKey.currentState?.focusRemembered();}else{focusHero();}return;}
     if(i<rows.length){rowKeys[rows[i]]?.currentState?.focusRemembered();}
+    else if(mainHome){platformRailKey.currentState?.focusRemembered();}
+    else if(platformStatusFocus.context!=null){platformStatusFocus.requestFocus();}
   }
   void focusHero(){
     scrollTop();
     if(heroFocus.context!=null){heroFocus.requestFocus();}
-    else if(section=='Home'){platformRailKey.currentState?.focusRemembered();}
+    else if(filtered){platformRailKey.currentState?.focusRemembered();}
+    else if(visibleRows.isNotEmpty||platformStatusFocus.context!=null){focusFirstShelf();}
+    else if(mainHome){platformRailKey.currentState?.focusRemembered();}
     else{sectionNav.requestFocus();}
   }
   KeyEventResult navKeys(FocusNode node,KeyEvent event){
     if(!engine.tv||event is! KeyDownEvent&&event is! KeyRepeatEvent)return KeyEventResult.ignored;
     final key=event.logicalKey;
+    if(key==LogicalKeyboardKey.select||key==LogicalKeyboardKey.enter||key==LogicalKeyboardKey.numpadEnter){
+      if(event is! KeyDownEvent)return KeyEventResult.handled;
+      if(homeNav.hasFocus){showSection('Home');return KeyEventResult.handled;}
+      if(movieNav.hasFocus){showSection('Movies');return KeyEventResult.handled;}
+      if(seriesNav.hasFocus){showSection('Series');return KeyEventResult.handled;}
+      if(animeNav.hasFocus){showSection('Anime');return KeyEventResult.handled;}
+      if(pinoyNav.hasFocus){showSection('Pinoy');return KeyEventResult.handled;}
+      if(searchNav.hasFocus){showSearch();return KeyEventResult.handled;}
+      if(menuNav.hasFocus){openNavMenu();return KeyEventResult.handled;}
+    }
     if(key==LogicalKeyboardKey.arrowDown){
       if(searching){searchPageKey.currentState?.focusKeyboard();}
       else{focusHero();}
@@ -189,7 +203,7 @@ class _CinemaHomeState extends State<CinemaHome> {
     if(!engine.tv||event is! KeyDownEvent&&event is! KeyRepeatEvent)return KeyEventResult.ignored;
     if(event.logicalKey==LogicalKeyboardKey.arrowUp){sectionNav.requestFocus();scrollTop();return KeyEventResult.handled;}
     if(event.logicalKey==LogicalKeyboardKey.arrowDown){
-      if(section=='Home'){platformRailKey.currentState?.focusRemembered();}else{focusFirstShelf();}
+      if(filtered){platformRailKey.currentState?.focusRemembered();}else{focusFirstShelf();}
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -201,44 +215,60 @@ class _CinemaHomeState extends State<CinemaHome> {
     final run=++catalogGeneration;
     final requested=Map<String,String>.of(collections);
     bool current()=>mounted&&run==catalogGeneration;
-    void apply(String key,List<Movie> items){
+    void apply(String key,CatalogSnapshot snapshot){
       if(!current())return;
+      final items=filtered?snapshot.movies:sectionMovies(key,snapshot);
       final row=rowKeys[collections[key]]?.currentState;
       // Keep the focused rail stable while an API refresh finishes.
       if(row?.hasActiveFocus==true&&shelves[key]?.isNotEmpty==true)return;
-      setState(()=>shelves[key]=items);
-      if(selected.value!=null&&items.isEmpty&&!collections.keys.any((k)=>shelves[k]?.any((m)=>m.id==selected.value!.id)==true)){
+      setState((){if(!filtered)rememberWeekly(verifiedWeekly,key,snapshot);shelves[key]=items;});
+      if(selected.value!=null&&!collections.keys.any((k)=>shelves[k]?.any((m)=>m.id==selected.value!.id)==true)&&
+        !rowKeys.values.any((k)=>k.currentState?.hasActiveFocus==true)){
         selected.value=collections.keys.expand((k)=>shelves[k]??<Movie>[]).firstOrNull;
       }
       if(selected.value==null&&items.isNotEmpty)selected.value=items.first;
     }
-    setState((){loading=!requested.keys.any((key)=>shelves[key]?.isNotEmpty==true);failures.clear();});
-    await Future.wait(requested.keys.map((key) async {
-      CatalogSnapshot? cached;
-      try{
-        cached=await shelfSnapshot(key,mode:'cached');
-        if(!current())return;
-        if(cached.cacheHit&&cached.movies.isNotEmpty)apply(key,cached.movies);
-      }catch(_){}
-      if(!current()||(!force&&cached?.cacheHit==true&&cached?.stale==false))return;
-      try{
-        final live=await shelfSnapshot(key,mode:force?'refresh':'normal');
-        if(!current())return;
-        apply(key,live.movies);
-        if(live.movies.isEmpty&&current()&&!key.startsWith('platform:')&&shelves[key]?.isNotEmpty!=true)setState(()=>failures[key]='No titles available');
-      }catch(_){
-        if(current()&&shelves[key]?.isNotEmpty!=true)setState(()=>failures[key]='Could not load this collection');
+    setState((){loading=true;failures.clear();shelves.removeWhere((key,_)=>!requested.containsKey(key));});
+    final keys=requested.keys.toList();
+    // Paint all available cached shelves before waiting on network requests.
+    final saved=<String,CatalogSnapshot>{};
+    for(var i=0;i<keys.length;i+=4){
+      if(!current())return;
+      await Future.wait(keys.skip(i).take(4).map((key)async{
+        try{
+          final cached=await shelfSnapshot(key,mode:'cached');
+          if(!current())return;
+          saved[key]=cached;
+          if(cached.movies.isNotEmpty)apply(key,cached);
+        }catch(_){}
+      }));
+    }
+    // Keep native network fan-out bounded; generation checks reject stale results.
+    for(var i=0;i<keys.length;i+=2){
+      if(!current())return;
+      await Future.wait(keys.skip(i).take(2).map((key)async{
+        if(!current()||(!force&&saved[key]?.cacheHit==true&&saved[key]?.stale==false))return;
+        try{
+          final live=await shelfSnapshot(key,mode:force?'refresh':'normal');
+          if(current())apply(key,live);
+        }catch(_){
+          if(current()&&shelves[key]?.isNotEmpty!=true)setState(()=>failures[key]='Could not load this collection');
+        }
+      }));
+    }
+    if(current()){
+      setState(()=>loading=false);
+      if(!filtered&&!heroFocus.hasFocus&&!rowKeys.values.any((k)=>k.currentState?.hasActiveFocus==true)){
+        final picks=featuredToday(collections.keys.expand((key)=>shelves[key]??<Movie>[]));
+        if(picks.isNotEmpty){featuredId=picks.first.id;selected.value=picks.first;}
       }
-    }));
-    if(current())setState(()=>loading=false);
+    }
   }
   List<Movie> uniqueMovies(Iterable<Movie> movies,{int limit=100}){
     final seen=<String>{};
     return movies.where((m)=>seen.add(m.id)).take(limit).toList();
   }
-  List<Movie> get popularMovies=>uniqueMovies([
-    ...?shelves['trending'],...?shelves['series'],...?shelves['anime'],...?shelves['pinoy'],...?shelves['korean'],...?shelves['english'],
-  ],limit:30);
+  List<Movie> get popularMovies=>uniqueMovies(collections.keys.expand((key)=>shelves[key]??<Movie>[]),limit:30);
   List<Movie> localMatches(String text){
     final needle=text.trim().toLowerCase();
     if(needle.isEmpty)return [];
@@ -273,10 +303,22 @@ class _CinemaHomeState extends State<CinemaHome> {
     });
   }
   void showSection(String name){
-    if(!searching&&section==name){scrollTop();return;}
-    setState((){section=name;searching=false;});
+    if(!searching&&section==name&&!filtered){scrollTop();return;}
+    catalogGeneration++;
+    if(homeScroll.hasClients)homeScroll.jumpTo(0);
+    setState((){
+      section=name;searching=false;platform=PlatformBrand.all;
+      failures.clear();rowKeys.clear();featuredId=null;loading=true;
+      shelves.removeWhere((key,_)=>!collections.containsKey(key));
+    });
     selected.value=collections.keys.expand((k)=>shelves[k]??<Movie>[]).firstOrNull;
-    scrollTop();load();
+    WidgetsBinding.instance.addPostFrameCallback((_){
+      if(mounted&&!searching&&section==name){
+        if(homeScroll.hasClients)homeScroll.jumpTo(0);
+        sectionNav.requestFocus();
+      }
+    });
+    load();
   }
   void showSearch(){
     setState(()=>searching=true);
@@ -314,9 +356,9 @@ class _CinemaHomeState extends State<CinemaHome> {
     final nav=Focus(canRequestFocus:false,onKeyEvent:navKeys,child:Container(
       decoration:tv?const BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Color(0xF0000000),Color(0xB0000000),Colors.transparent])):null,
       padding:EdgeInsets.symmetric(horizontal:tv?40:16,vertical:10),
-      child:Stack(alignment:Alignment.center,children:[
-        if(tv)const Align(alignment:Alignment.centerLeft,child:Wordmark()),
-        Padding(padding:EdgeInsets.symmetric(horizontal:tv?82:26),child:SingleChildScrollView(scrollDirection:Axis.horizontal,
+      child:Row(children:[
+        if(tv)const SizedBox(width:100,child:Wordmark()),
+        Expanded(child:Center(child:SingleChildScrollView(scrollDirection:Axis.horizontal,
           child:Row(mainAxisSize:MainAxisSize.min,children:[
             navButton('Home',homeNav,!searching&&section=='Home',()=>showSection('Home')),
             navButton('Search',searchNav,searching,showSearch,icon:Icons.search_rounded),
@@ -326,8 +368,8 @@ class _CinemaHomeState extends State<CinemaHome> {
             navButton('Anime',animeNav,!searching&&section=='Anime',()=>showSection('Anime')),
             navDivider(),
             navButton('Pinoy',pinoyNav,!searching&&section=='Pinoy',()=>showSection('Pinoy')),
-          ]))),
-        Align(alignment:Alignment.centerRight,child:IconButton(key:menuAnchor,focusNode:menuNav,tooltip:'Menu',onPressed:openNavMenu,icon:const Icon(Icons.more_vert)))
+          ])))),
+        SizedBox(width:tv?100:40,child:Align(alignment:Alignment.centerRight,child:IconButton(key:menuAnchor,focusNode:menuNav,tooltip:'Menu',onPressed:openNavMenu,icon:const Icon(Icons.more_vert))))
       ])));
     return Scaffold(body:SafeArea(child:Shortcuts(shortcuts:const {
       SingleActivator(LogicalKeyboardKey.select):ActivateIntent(),
@@ -336,7 +378,7 @@ class _CinemaHomeState extends State<CinemaHome> {
       if(tv&&!searching)Positioned.fill(child:ambient()),
       Positioned.fill(child:Column(children:[
         nav,
-        Expanded(child:searching?buildSearch(tv):buildHome(tv))
+        Expanded(child:searching?buildSearch(tv):KeyedSubtree(key:ValueKey('catalog:$section:${platform.key}'),child:buildHome(tv)))
       ]))
     ]))));
   }
@@ -399,15 +441,13 @@ class _CinemaHomeState extends State<CinemaHome> {
     if(mounted&&!filtered)await load(force:true);
     if(mounted&&searching&&search.text.trim().isNotEmpty)query(search.text);
   }
-  Widget providerCredit()=>const Padding(padding:EdgeInsets.symmetric(horizontal:16,vertical:8),
-    child:Text('Catalog artwork and metadata: TMDB · Streaming availability: JustWatch',style:TextStyle(fontSize:10,color:CinemaColors.muted)));
   Widget navDivider()=>Padding(
     padding:EdgeInsets.symmetric(horizontal:engine.tv?9:5),
     child:ExcludeSemantics(child:Container(width:1,height:19,color:const Color(0x26F5F1EB))));
   Widget navButton(String label,FocusNode node,bool active,VoidCallback action,{IconData? icon})=>Builder(builder:(ctx)=>Semantics(
     label:icon!=null?label:null,selected:active,
     child:TextButton(
-      key:ValueKey('nav-$label'),focusNode:node,onFocusChange:(focused){
+      key:ValueKey('nav-$label'),focusNode:node,autofocus:label=='Home',onFocusChange:(focused){
         if(!focused)return;
         if(!searching)scrollTop();
         WidgetsBinding.instance.addPostFrameCallback((_){
@@ -425,7 +465,7 @@ class _CinemaHomeState extends State<CinemaHome> {
   Widget poster(Movie m,bool tv)=>RemoteTile(label:m.title,onPressed:()=>open(m),onFocused:()=>selected.value=m,child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
     Expanded(child:Stack(fit:StackFit.expand,children:[CinemaArt(m.poster),Positioned(top:5,left:5,child:PlatformPill(engine:engine,movie:m))])),Padding(padding:const EdgeInsets.all(5),child:Text(m.title,maxLines:1,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?15:12)))
   ]));
-  Widget shelf(String name,List<Movie> movies,bool tv)=>tv?CinemaShelf(key:rowKeys.putIfAbsent(name,()=>GlobalKey<CinemaShelfState>()),title:name,movies:movies,engine:engine,onHighlight:(m)=>selected.value=m,onOpen:open,onVertical:(down)=>moveRow(name,down),onRowFocus:()=>revealRow(name)):Padding(padding:const EdgeInsets.only(bottom:22),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+  Widget shelf(String name,List<Movie> movies,bool tv)=>tv?CinemaShelf(key:rowKeys.putIfAbsent(name,()=>GlobalKey<CinemaShelfState>()),title:name,movies:movies,engine:engine,ranked:isRankedSection(name),history:name=='Continue watching'?widget.history:null,onHighlight:(m)=>selected.value=m,onOpen:open,onVertical:(down)=>moveRow(name,down),onRowFocus:()=>revealRow(name)):Padding(padding:const EdgeInsets.only(bottom:22),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     Padding(padding:EdgeInsets.symmetric(horizontal:tv?40:16),child:Text(name,style:TextStyle(fontSize:tv?22:19,fontWeight:FontWeight.w700))),
     const SizedBox(height:10),
     SizedBox(height:tv?204:175,child:ListView.builder(scrollDirection:Axis.horizontal,padding:EdgeInsets.symmetric(horizontal:tv?40:16),itemCount:movies.length,itemBuilder:(_,i)=>Padding(padding:const EdgeInsets.only(right:10),child:SizedBox(width:tv?132:112,child:poster(movies[i],tv)))))
@@ -435,12 +475,14 @@ class _CinemaHomeState extends State<CinemaHome> {
       const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(colors:[CinemaColors.canvas,Color(0xB011110F),Color(0x5511110F)],stops:[0,.42,1]))),
       const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(begin:Alignment.topCenter,end:Alignment.bottomCenter,colors:[Colors.transparent,CinemaColors.canvas],stops:[.25,.96])))
     ]));
-  Widget buildHome(bool tv)=>SingleChildScrollView(controller:homeScroll,child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-      ValueListenableBuilder<Movie?>(valueListenable:selected,builder:(_,m,__)=>m==null?ConstrainedBox(constraints:BoxConstraints(minHeight:tv?270:200),child:Padding(padding:EdgeInsets.fromLTRB(tv?40:16,28,16,16),child:Align(alignment:Alignment.bottomLeft,child:Text(filtered?platform.name:section,style:const TextStyle(fontSize:32,fontWeight:FontWeight.w800))))):hero(m,tv)),
-      if(loading)const LinearProgressIndicator(),
-      if(section=='Home')PlatformRail(key:platformRailKey,providers:[...platformDirectory,...platformArtwork],selected:platform,tv:tv,onSelected:selectPlatform,onUp:(){
-        if(heroFocus.context!=null)focusHero();else sectionNav.requestFocus();
-      },onDown:focusFirstShelf),
+  Widget platformRow(bool tv)=>PlatformRail(key:platformRailKey,providers:[...platformDirectory,...platformArtwork],selected:platform,tv:tv,onSelected:selectPlatform,onUp:(){
+    if(mainHome&&visibleRows.isNotEmpty){rowKeys[visibleRows.last]?.currentState?.focusRemembered();}
+    else if(heroFocus.context!=null){focusHero();}else{sectionNav.requestFocus();}
+  },onDown:(){if(filtered)focusFirstShelf();});
+  Widget buildHome(bool tv)=>SingleChildScrollView(key:const ValueKey('tv-home-scroll'),controller:homeScroll,child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+      ValueListenableBuilder<Movie?>(valueListenable:selected,builder:(_,m,__)=>m==null?ConstrainedBox(constraints:BoxConstraints(minHeight:tv?270:200),child:Padding(padding:EdgeInsets.fromLTRB(tv?40:16,28,16,16),child:Align(alignment:Alignment.bottomLeft,child:Text(filtered?platform.name:categoryName(section),key:const ValueKey('tv-catalog-heading'),style:const TextStyle(fontSize:32,fontWeight:FontWeight.w800))))):hero(m,tv)),
+      if(loading)const LinearProgressIndicator(minHeight:2),
+      if(filtered)platformRow(tv),
       if(continued.isNotEmpty)shelf('Continue watching',continued,tv),
       if(filtered&&!loading&&(collections.isEmpty||!collections.keys.any((k)=>shelves[k]?.isNotEmpty==true)))Padding(
         padding:EdgeInsets.symmetric(horizontal:tv?40:16,vertical:16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
@@ -452,8 +494,20 @@ class _CinemaHomeState extends State<CinemaHome> {
         ])),
       for(final entry in collections.entries)
         if(shelves[entry.key]?.isNotEmpty==true)shelf(entry.value,shelves[entry.key]!,tv)
-        else if(failures.containsKey(entry.key))Padding(padding:const EdgeInsets.all(16),child:TextButton(onPressed:()=>load(force:true),child:Text('Retry ${entry.value}'))),
-      providerCredit(),
+        else if((mainHome||filtered)&&failures.containsKey(entry.key))Padding(padding:const EdgeInsets.all(16),child:TextButton(onPressed:()=>load(force:true),child:Text('Retry ${entry.value}'))),
+      if(mainHome)platformRow(tv),
+      if(!filtered&&!mainHome&&(!engine.providersConfigured||(!loading&&(failures.isNotEmpty||!collections.keys.any((k)=>shelves[k]?.isNotEmpty==true)))))
+        Padding(padding:const EdgeInsets.fromLTRB(40,8,40,28),child:Align(alignment:Alignment.centerLeft,
+          child:Focus(canRequestFocus:false,onKeyEvent:(_,event){
+            if(event is KeyDownEvent&&event.logicalKey==LogicalKeyboardKey.arrowUp){
+              if(visibleRows.isNotEmpty){rowKeys[visibleRows.last]?.currentState?.focusRemembered();}
+              else{sectionNav.requestFocus();scrollTop();}
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },child:TextButton(focusNode:platformStatusFocus,
+            onPressed:engine.providersConfigured?()=>load(force:true):providerSettings,
+            child:Text(engine.providersConfigured?'Retry catalog':'Enable full catalog'))))),
     ]));
   Widget hero(Movie m,bool tv)=>Stack(children:[
     if(!tv) Positioned.fill(child:Stack(fit:StackFit.expand,children:[
@@ -463,6 +517,9 @@ class _CinemaHomeState extends State<CinemaHome> {
     ConstrainedBox(constraints:BoxConstraints(minHeight:tv?270:340),child:SizedBox(width:double.infinity,
       child:Padding(padding:EdgeInsets.fromLTRB(tv?40:16,24,16,16),child:Align(alignment:Alignment.bottomLeft,heightFactor:1,
         child:ConstrainedBox(constraints:BoxConstraints(maxWidth:tv?440:340),child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+          if(!filtered)Padding(padding:const EdgeInsets.only(bottom:8),child:Text(
+            m.id==featuredId?categoryFeature(section):categoryName(section).toUpperCase(),
+            key:const ValueKey('tv-catalog-heading'),style:const TextStyle(color:CinemaColors.accent,fontSize:12,fontWeight:FontWeight.w700,letterSpacing:1.6))),
           Text(m.title,maxLines:2,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:tv?42:32,height:1.05,fontWeight:FontWeight.w800)),
           if(m.metadata.isNotEmpty)Padding(padding:const EdgeInsets.only(top:8),child:Text(m.metadata,style:const TextStyle(color:CinemaColors.muted))),
           if(tv)Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Text(m.description,maxLines:2,overflow:TextOverflow.ellipsis)),

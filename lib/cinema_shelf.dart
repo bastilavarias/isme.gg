@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'design.dart';
 import 'engine.dart';
 import 'platform_pill.dart';
+import 'home_sections.dart';
 
 /// Remember a row's cursor, but expand only the card with actual focus.
 class CinemaShelf extends StatefulWidget {
@@ -12,13 +13,16 @@ class CinemaShelf extends StatefulWidget {
   final ValueChanged<bool>? onVertical;
   final VoidCallback? onRowFocus;
   final NativeEngine? engine;
+  final bool ranked;
+  final History? history;
   const CinemaShelf({super.key, required this.title, required this.movies,
-    required this.onHighlight, required this.onOpen, this.onVertical, this.onRowFocus, this.engine});
+    required this.onHighlight, required this.onOpen, this.onVertical, this.onRowFocus, this.engine,this.ranked=false,this.history});
   @override CinemaShelfState createState() => CinemaShelfState();
 }
 
 class CinemaShelfState extends State<CinemaShelf> {
   static const height = 204.0, narrow = 132.0, wide = 348.0, gap = 10.0, gutter = 40.0;
+  double get cardWidth=>widget.ranked?190:widget.history!=null?260:narrow;
   final ScrollController _scroll = ScrollController();
   final Map<String, FocusNode> _nodes = {};
   String? _remembered, _focused;
@@ -35,7 +39,7 @@ class CinemaShelfState extends State<CinemaShelf> {
   FocusNode _node(Movie movie) => _nodes.putIfAbsent(movie.id,
       () => FocusNode(debugLabel: '${widget.title}: ${movie.title}'));
   double _expandedWidth(double viewport) =>
-      (viewport - gutter * 2).clamp(narrow, wide).toDouble();
+      (viewport - gutter * 2).clamp(cardWidth, wide).toDouble();
 
   void focusRemembered() {
     if (widget.movies.isEmpty) return;
@@ -49,7 +53,7 @@ class CinemaShelfState extends State<CinemaShelf> {
     if (!_scroll.hasClients) return;
     final revision = ++_revision;
     final pos = _scroll.position;
-    final offset = (index * (narrow + gap)).clamp(pos.minScrollExtent, pos.maxScrollExtent).toDouble();
+    final offset = (index * (cardWidth + gap)).clamp(pos.minScrollExtent, pos.maxScrollExtent).toDouble();
     if (_motion == Duration.zero) { pos.jumpTo(offset); }
     else { pos.animateTo(offset, duration: _motion, curve: Curves.easeOutCubic); }
     Future<void>.delayed(_motion, () {
@@ -80,7 +84,7 @@ class CinemaShelfState extends State<CinemaShelf> {
     if (!mounted || revision != _revision || !_scroll.hasClients) return;
     final pos = _scroll.position;
     if (!pos.hasContentDimensions) return;
-    final left = gutter + index * (narrow + gap);
+    final left = gutter + index * (cardWidth + gap);
     final right = left + _expandedWidth(pos.viewportDimension);
     var offset = pos.pixels;
     if (left < offset + 12) { offset = left - 12; }
@@ -125,32 +129,41 @@ class CinemaShelfState extends State<CinemaShelf> {
           SizedBox(height: height, child: LayoutBuilder(builder: (context, constraints) {
             final expandedWidth = _expandedWidth(constraints.maxWidth);
             return ListView.builder(controller: _scroll, scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: gutter), cacheExtent: expandedWidth + narrow,
+              padding: const EdgeInsets.symmetric(horizontal: gutter), cacheExtent: expandedWidth + cardWidth,
               itemCount: widget.movies.length,
               itemBuilder: (context, index) {
                 final movie = widget.movies[index];
                 final expanded = movie.id == _focused;
                 return Padding(key: ValueKey(movie.id), padding: const EdgeInsets.only(right: gap),
                   child: AnimatedContainer(key: ValueKey('size-${movie.id}'),
-                    width: expanded ? expandedWidth : narrow, duration: duration, curve: Curves.easeOutCubic,
+                    width: expanded ? expandedWidth : cardWidth, duration: duration, curve: Curves.easeOutCubic,
                     onEnd: () { if (expanded && _focused == movie.id) _reveal(index, _revision); },
-                    child: RemoteTile(label: movie.title, focusNode: _node(movie),
+                    child: RemoteTile(label: widget.ranked?'Rank ${index+1}: ${movie.title}':widget.history!=null?resumeTitle(movie):movie.title, focusNode: _node(movie),
                       onPressed: () => widget.onOpen(movie), revealOnFocus: false,
                       onFocusChanged: (value) => _highlight(movie, index, value),
                       child: Stack(fit: StackFit.expand, children: [
                         AnimatedSwitcher(duration: duration,
                           layoutBuilder: (current, previous) => Stack(fit: StackFit.expand,
                             children: [...previous, if (current != null) current]),
-                          child: CinemaArt(expanded ? movie.art : movie.poster,
-                            key: ValueKey(expanded ? movie.art : movie.poster),
-                            cacheWidth: expanded ? 768 : 360)),
-                        if (expanded || movie.poster.isEmpty) const DecoratedBox(decoration: BoxDecoration(
+                          child: widget.ranked&&!expanded
+                            ?RankedArtwork(key:ValueKey('rank-${movie.id}'),rank:index+1,child:Stack(fit:StackFit.expand,children:[
+                              CinemaArt(movie.poster.isEmpty?movie.art:movie.poster,cacheWidth:360),
+                              if(widget.engine!=null)Positioned(top:5,left:5,child:PlatformPill(engine:widget.engine!,movie:movie)),
+                            ]))
+                            :CinemaArt(expanded||widget.history!=null ? movie.art : movie.poster,
+                              key: ValueKey(expanded||widget.history!=null ? movie.art : movie.poster),
+                              cacheWidth: expanded||widget.history!=null ? 768 : 360)),
+                        if (expanded || widget.history!=null || movie.poster.isEmpty&&!widget.ranked) const DecoratedBox(decoration: BoxDecoration(
                           gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
                             colors: [Colors.transparent, Color(0xDD000000)], stops: [.45, 1]))),
-                        if (expanded || movie.poster.isEmpty) Positioned(left: 10, right: 10, bottom: 10,
-                          child: Text(movie.title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                        if (expanded || widget.history!=null || movie.poster.isEmpty&&!widget.ranked) Positioned(left: 10, right: 10, bottom: widget.history!=null?16:10,
+                          child: Text(widget.history!=null?resumeTitle(movie):movie.title, maxLines: 2, overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: expanded ? 23 : 14, fontWeight: FontWeight.w700))),
-                        if(widget.engine!=null) Positioned(top:5,left:5,child:PlatformPill(engine:widget.engine!,movie:movie)),
+                        if(widget.engine!=null&&(!widget.ranked||expanded)) Positioned(top:5,left:widget.ranked?62:5,child:PlatformPill(engine:widget.engine!,movie:movie)),
+                        if(widget.ranked&&expanded)Positioned(top:10,left:10,child:Container(
+                          padding:const EdgeInsets.symmetric(horizontal:9,vertical:4),decoration:BoxDecoration(color:CinemaColors.canvas,borderRadius:BorderRadius.circular(5)),
+                          child:Text('#${index+1}',style:const TextStyle(color:CinemaColors.accent,fontSize:16,fontWeight:FontWeight.w800)))),
+                        if(widget.history?.fraction(movie)!=null)Align(alignment:Alignment.bottomCenter,child:LinearProgressIndicator(value:widget.history!.fraction(movie),minHeight:4)),
                         if (expanded) const Positioned(top: 10, right: 10,
                           child: Icon(Icons.play_circle_fill, size: 26, color: CinemaColors.ink)),
                       ]))));

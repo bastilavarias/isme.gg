@@ -48,7 +48,7 @@ final class CatalogCache extends SQLiteOpenHelper {
 
     synchronized void write(String kind, String key, JSONObject data) {
         try {
-            boolean catalog = "catalog".equals(kind) || "tv_catalog".equals(kind) || "episodes".equals(kind) || "platform_catalog".equals(kind) || "platform_directory".equals(kind);
+            boolean catalog = "home_catalog".equals(kind) || "catalog".equals(kind) || "tv_catalog".equals(kind) || "episodes".equals(kind) || "platform_catalog".equals(kind) || "platform_directory".equals(kind);
             String payload = data.toString();
             if (payload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length >
                     (catalog ? MAX_CATALOG_BYTES : MAX_PROVIDER_BYTES)) return;
@@ -63,7 +63,7 @@ final class CatalogCache extends SQLiteOpenHelper {
                     new Object[]{kind,System.currentTimeMillis()-(catalog?30*DAY:7*DAY)});
                 db.execSQL("DELETE FROM entries WHERE kind=? AND cache_key NOT IN "
                     +"(SELECT cache_key FROM entries WHERE kind=? ORDER BY updated DESC,cache_key LIMIT ?)",
-                    new Object[]{kind,kind,"episodes".equals(kind)||"platform_catalog".equals(kind)?24:"platform_directory".equals(kind)?4:catalog?12:300});
+                    new Object[]{kind,kind,"home_catalog".equals(kind)?64:"episodes".equals(kind)||"platform_catalog".equals(kind)?24:"platform_directory".equals(kind)?4:catalog?12:300});
                 db.setTransactionSuccessful();
             } finally { db.endTransaction(); }
         } catch (Exception ignored) {
@@ -74,7 +74,7 @@ final class CatalogCache extends SQLiteOpenHelper {
     JSONObject catalog(Context context, String collection, String query, String mode) throws Exception {
         // Do not persist personal search terms; the six home collections are bounded.
         if (!query.trim().isEmpty()) return MediaCatalog.catalog(context,collection,query);
-        if (!collection.matches("trending|pinoy|korean|english|action|horror|scifi|top_rated"))
+        if (!collection.matches("trending|pinoy|korean|english|action|horror|scifi|top_rated|comedy|romance"))
             throw new IllegalArgumentException("Unknown collection");
         long ttl = "trending".equals(collection)?3*HOUR:DAY;
         Entry cached = read("catalog",collection);

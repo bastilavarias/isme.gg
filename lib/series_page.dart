@@ -217,8 +217,7 @@ class _SeriesPageState extends State<SeriesPage> {
           else if(_error!=null)Row(children:[Expanded(child:Text(_error!,style:const TextStyle(color:CinemaColors.muted))),TextButton(onPressed:()=>_season==null?_loadSeasons():_chooseSeason(_season!),child:const Text('Retry'))])
           else if(_episodes.isEmpty)const Padding(padding:EdgeInsets.all(20),child:Text('No episodes listed.'))
           else _rail(tv),
-          const SizedBox(height:5),
-          const Text('Metadata from TMDB / Cinemeta',style:TextStyle(color:CinemaColors.muted,fontSize:10)),
+
         ])),
     ])));
   }

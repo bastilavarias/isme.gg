@@ -242,7 +242,6 @@ class CinemaSearchPageState extends State<CinemaSearchPage> {
           },
           itemBuilder:(_,i)=>resultCard(widget.movies[i],tv));
       }))),
-    const Text('Streaming availability: JustWatch via TMDB',style:TextStyle(fontSize:10,color:CinemaColors.muted)),
   ]);
   @override Widget build(BuildContext context){
     final tv=widget.engine.tv;

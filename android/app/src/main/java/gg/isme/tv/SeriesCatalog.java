@@ -15,6 +15,11 @@ final class SeriesCatalog {
         String path=o.optString(key,"");
         return path.matches("/[a-zA-Z0-9_.-]+")?"https://image.tmdb.org/t/p/"+size+path:"";
     }
+    static boolean country(JSONObject row,String country){
+        JSONArray countries=row.optJSONArray("origin_country");
+        if(countries!=null)for(int i=0;i<countries.length();i++)if(country.equals(countries.optString(i)))return true;
+        return false;
+    }
     static boolean japaneseAnimation(JSONObject row){
         JSONArray genres=row.optJSONArray("genre_ids"), countries=row.optJSONArray("origin_country");
         boolean animation=false,japan=false;
@@ -44,14 +49,16 @@ final class SeriesCatalog {
             String date=m.optString("first_air_date","");
             items.put(new JSONObject().put("id","tmdb:tv:"+id).put("tmdbId",id)
                 .put("title",name).put("type",anime?"Anime":"Series").put("description",m.optString("overview",""))
+                .put("pinoy",country(m,"PH")||"tl".equals(m.optString("original_language")))
                 .put("poster",image(m,"poster_path","w342")).put("backdrop",image(m,"backdrop_path","w1280"))
-                .put("year",date.length()>=4?date.substring(0,4):"").put("ratingLabel",m.optDouble("vote_average",0)>0?String.format(java.util.Locale.US,"%.1f",m.optDouble("vote_average")):""));
+                .put("year",date.length()>=4?date.substring(0,4):"").put("releaseDate",date).put("ratingLabel",m.optDouble("vote_average",0)>0?String.format(java.util.Locale.US,"%.1f",m.optDouble("vote_average")):""));
         }
         return items;
     }
     private static JSONArray cinemetaRows(String collection,String query)throws Exception{
         boolean anime=collection.startsWith("anime");
-        String suffix=query.isEmpty()?(anime?"top/genre=Animation":collection.endsWith("rated")?"imdbRating":"top")
+        String genre="series_crime".equals(collection)?"Crime":"series_drama".equals(collection)?"Drama":"series_comedy".equals(collection)?"Comedy":"";
+        String suffix=query.isEmpty()?(anime?"top/genre=Animation":collection.endsWith("rated")?"imdbRating":!genre.isEmpty()?"top/genre="+genre:"top")
             :"top/search="+MediaCatalog.encode(query);
         JSONArray raw=MediaCatalog.getJson(MediaCatalog.CINEMETA+"/catalog/series/"+suffix+".json",1024*1024).optJSONArray("metas");
         if(raw==null)throw new IOException("Invalid series catalog");
@@ -69,7 +76,7 @@ final class SeriesCatalog {
         return items;
     }
     JSONObject catalog(String collection,String query,String mode,String token)throws Exception{
-        if(!collection.matches("series|series_rated|series_pinoy|anime|anime_rated"))throw new IllegalArgumentException("Invalid TV collection");
+        if(!collection.matches("series|series_rated|series_pinoy|series_crime|series_drama|series_comedy|anime|anime_rated"))throw new IllegalArgumentException("Invalid TV collection");
         boolean search=!query.isEmpty(),anime=collection.startsWith("anime"),pinoy="series_pinoy".equals(collection);
         String key=collection;
         CatalogCache.Entry saved=search?null:cache.read("tv_catalog",key);
@@ -84,7 +91,8 @@ final class SeriesCatalog {
                 try{
                     String path=search?"/search/tv?include_adult=false&query="+MediaCatalog.encode(query):
                         "/discover/tv?include_adult=false&sort_by="+(collection.endsWith("rated")?"vote_average.desc&vote_count.gte=100":"popularity.desc")+
-                        (anime?"&with_genres=16&with_origin_country=JP":pinoy?"&with_origin_country=PH":"");
+                        (anime?"&with_genres=16&with_origin_country=JP":pinoy?"&with_origin_country=PH":
+                            "series_crime".equals(collection)?"&with_genres=80":"series_drama".equals(collection)?"&with_genres=18":"series_comedy".equals(collection)?"&with_genres=35":"");
                     items=tmdbRows(WatchProviders.get(path,token).optJSONArray("results"),anime);
                     source="tmdb";
                 }catch(Exception e){if(pinoy)throw e;items=cinemetaRows(collection,query);}

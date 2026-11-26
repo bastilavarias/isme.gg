@@ -4,22 +4,42 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Only fall back to matching data, never recycle a generic catalog under a
+/// specific date, genre, nationality, ranking or independent-film claim.
+const editorialFallback={
+  'weekly_movies':'trending','weekly_tv':'series','weekly_series':'series','weekly_anime':'anime',
+  'pinoy_home':'pinoy','korean_home':'korean','recent_home':'',
+  'page_movies_action':'action','page_movies_comedy':'comedy','page_movies_horror':'horror',
+  'page_movies_scifi':'scifi','page_movies_romance':'romance','page_movies_rated':'top_rated',
+  'page_series_crime':'series_crime','page_series_drama':'series_drama','page_series_comedy':'series_comedy',
+  'page_series_rated':'series_rated',
+  'page_pinoy_movies':'pinoy','page_pinoy_series':'series_pinoy','page_pinoy_classics':'pinoy',
+};
+bool editorialCollection(String key)=>key.startsWith('page_')||editorialFallback.containsKey(key);
+List<Movie> editorialFallbackMovies(String key,List<Movie> movies){
+  if(key=='weekly_series'||key.startsWith('page_series_'))return movies.where((m)=>m.type=='Series').toList();
+  if(key=='weekly_anime'||key.startsWith('page_anime_'))return movies.where((m)=>m.type=='Anime'||m.animeFilm).toList();
+  if(key=='page_pinoy_classics')return movies.where((m){final y=int.tryParse(m.year);return y!=null&&y>0&&y<2000;}).toList();
+  return movies;
+}
+
 class Movie {
   final String id, title, description, poster, backdrop;
   final String year, genre, runtime, rating;
   final int tmdbId;
   final String type, episodeTitle;
+  final bool pinoy,animeFilm;
   bool get episodic=>type=='Series'||type=='Anime';
   bool get isEpisode=>episodic&&RegExp(r'^(imdb:tt[0-9]{7,10}|tmdb:tv:[1-9][0-9]{0,8}):s[0-9]{1,5}:e[0-9]{1,5}$').hasMatch(id);
-  const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = '', this.genre = '', this.runtime = '', this.rating = '', this.tmdbId = 0, this.type='Movie', this.episodeTitle=''});
+  const Movie({required this.id, required this.title, this.description = '', this.poster = '', this.backdrop = '', this.year = '', this.genre = '', this.runtime = '', this.rating = '', this.tmdbId = 0, this.type='Movie', this.episodeTitle='',this.pinoy=false,this.animeFilm=false});
   static String _field(dynamic value) => value == null ? '' : value.toString().trim();
   static String _genre(dynamic value) => value is List ? value.take(2).map(_field).where((s)=>s.isNotEmpty).join(', ') : _field(value);
   String get metadata => [type,genre,year,runtime,rating].where((s)=>s.isNotEmpty).join(' · ');
   factory Movie.fromJson(Map<String, dynamic> j) => Movie(
     id: j['id']?.toString() ?? '', title: j['title']?.toString() ?? '',
     description: j['description']?.toString() ?? '', poster: j['poster']?.toString() ?? '',
-    backdrop: _field(j['backdrop']), year: _field(j['year']), genre: _genre(j['genres']??j['genre']), runtime: _field(j['runtime']), rating: _field(j['ratingLabel']), tmdbId: int.tryParse(_field(j['tmdbId']))??0, type: const ['Series','Anime'].contains(j['type'])?j['type'] as String:'Movie', episodeTitle:_field(j['episodeTitle']));
-  Map<String, dynamic> toJson() => {'id':id,'title':title,'description':description,'poster':poster,'backdrop':backdrop,'year':year,'genre':genre,'runtime':runtime,'ratingLabel':rating,'tmdbId':tmdbId,'type':type,'episodeTitle':episodeTitle};
+    backdrop: _field(j['backdrop']), year: _field(j['year']), genre: _genre(j['genres']??j['genre']), runtime: _field(j['runtime']), rating: _field(j['ratingLabel']??j['rating']), tmdbId: int.tryParse(_field(j['tmdbId']))??0, type: const ['Series','Anime'].contains(j['type'])?j['type'] as String:'Movie', episodeTitle:_field(j['episodeTitle']),pinoy:j['pinoy']==true,animeFilm:j['animeFilm']==true);
+  Map<String, dynamic> toJson() => {'id':id,'title':title,'description':description,'poster':poster,'backdrop':backdrop,'year':year,'genre':genre,'runtime':runtime,'ratingLabel':rating,'tmdbId':tmdbId,'type':type,'episodeTitle':episodeTitle,'pinoy':pinoy,'animeFilm':animeFilm};
   String get art => backdrop.isNotEmpty ? backdrop : poster;
 }
 class Season {
@@ -39,11 +59,12 @@ class Episode {
 class CatalogSnapshot {
   final List<Movie> movies;
   final bool cacheHit, stale;
-  const CatalogSnapshot(this.movies,{required this.cacheHit,required this.stale});
+  final String source;
+  const CatalogSnapshot(this.movies,{required this.cacheHit,required this.stale,this.source=''});
   factory CatalogSnapshot.fromJson(Map<String,dynamic> data)=>CatalogSnapshot(
     (data['items'] as List? ?? []).whereType<Map<String,dynamic>>().map(Movie.fromJson)
       .where((m)=>m.id.isNotEmpty&&m.title.isNotEmpty).toList(),
-    cacheHit:data['cacheHit']==true,stale:data['stale']==true);
+    cacheHit:data['cacheHit']==true,stale:data['stale']==true,source:data['source']?.toString()??'');
 }
 class WatchProvider {
   final int id;
@@ -135,11 +156,34 @@ class NativeEngine {
     return data;
   }
   Future<CatalogSnapshot> catalogSnapshot(String collection,{String mode='normal',String query=''}) async {
-    if(collection.startsWith('series')||collection.startsWith('anime')){
-      return CatalogSnapshot.fromJson(await json('/api/tv/catalog',body:{
-        'collection':collection,'query':query,'mode':mode,'token':_providerToken}));
+    if(editorialCollection(collection)){
+      if(providersConfigured){
+        try{
+          final data=CatalogSnapshot.fromJson(await json('/api/home/catalog',body:{'collection':collection,'mode':mode,'token':_providerToken}));
+          if(data.movies.isNotEmpty)return data;
+        }catch(_){
+          if(mode!='cached'&&collection.startsWith('page_')&&(editorialFallback[collection]??'').isEmpty)rethrow;
+        }
+      }
+      final fallback=editorialFallback[collection]??'';
+      if(fallback.isEmpty)return const CatalogSnapshot([],cacheHit:false,stale:false);
+      final data=await catalogSnapshot(fallback,mode:mode);
+      // Never advertise generic popular data as a verified weekly ranking.
+      final items=editorialFallbackMovies(collection,data.movies);
+      return CatalogSnapshot(items,cacheHit:data.cacheHit,stale:providersConfigured||data.stale,source:'fallback');
     }
-    return CatalogSnapshot.fromJson(await json('/api/catalog',query:{'collection':collection,'query':query,'mode':mode}));
+    final CatalogSnapshot data;
+    if(collection.startsWith('series')||collection.startsWith('anime')){
+      data=CatalogSnapshot.fromJson(await json('/api/tv/catalog',body:{
+        'collection':collection,'query':query,'mode':mode,'token':_providerToken}));
+    }else{
+      data=CatalogSnapshot.fromJson(await json('/api/catalog',query:{'collection':collection,'query':query,'mode':mode}));
+    }
+    if(query.isEmpty&&(collection=='pinoy'||collection=='series_pinoy')){
+      return CatalogSnapshot(data.movies.map((m)=>Movie.fromJson({...m.toJson(),'pinoy':true})).toList(),
+        cacheHit:data.cacheHit,stale:data.stale,source:data.source);
+    }
+    return data;
   }
   Future<List<WatchProvider>> watchPlatforms({String mode='normal',bool artworkOnly=false}) async {
     final data=await json('/api/platforms',body:{'country':artworkOnly?'GLOBAL':providerCountry,'token':_providerToken,'mode':mode});
@@ -248,6 +292,10 @@ class History {
     return rows.map(Movie.fromJson).toList();
   }
   Duration position(Movie m) => Duration(seconds: (_data[m.id]?['time'] as int?) ?? 0);
+  double? fraction(Movie m){
+    final row=_data[m.id],time=row?['time'],duration=row?['duration'];
+    return time is num&&duration is num&&duration>0?(time/duration).clamp(0.0,1.0).toDouble():null;
+  }
   Future<void> save(Movie m, Duration position, Duration duration) async {
     final seconds=position.inSeconds;
     if(seconds<12 || m.id.isEmpty) return;

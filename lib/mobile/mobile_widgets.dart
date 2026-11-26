@@ -2,19 +2,22 @@ import 'package:flutter/material.dart';
 import '../design.dart';
 import '../engine.dart';
 import '../platform_pill.dart';
+import '../home_sections.dart';
 
 class MobilePoster extends StatelessWidget{
   final Movie movie;
   final NativeEngine engine;
   final VoidCallback onTap;
-  const MobilePoster({super.key,required this.movie,required this.engine,required this.onTap});
-  @override Widget build(BuildContext context)=>Semantics(button:true,label:movie.title,child:Material(
+  final int? rank;
+  const MobilePoster({super.key,required this.movie,required this.engine,required this.onTap,this.rank});
+  Widget _art()=>Stack(fit:StackFit.expand,children:[
+    CinemaArt(movie.poster.isEmpty?movie.art:movie.poster,cacheWidth:360),
+    Positioned(top:5,left:5,child:PlatformPill(engine:engine,movie:movie)),
+  ]);
+  @override Widget build(BuildContext context)=>Semantics(button:true,label:rank==null?movie.title:'Rank $rank: ${movie.title}',child:Material(
     color:Colors.transparent,borderRadius:BorderRadius.circular(9),clipBehavior:Clip.antiAlias,
     child:InkWell(onTap:onTap,child:Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
-      Expanded(child:ClipRRect(borderRadius:BorderRadius.circular(8),child:Stack(fit:StackFit.expand,children:[
-        CinemaArt(movie.poster.isEmpty?movie.art:movie.poster,cacheWidth:360),
-        Positioned(top:5,left:5,child:PlatformPill(engine:engine,movie:movie)),
-      ]))),
+      Expanded(child:rank!=null?RankedArtwork(rank:rank!,child:_art()):ClipRRect(borderRadius:BorderRadius.circular(8),child:_art())),
       const SizedBox(height:5),
       Text(movie.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:12,fontWeight:FontWeight.w500)),
     ]))));

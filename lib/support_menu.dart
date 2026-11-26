@@ -73,6 +73,7 @@ Future<void> showReportProblem(BuildContext context,NativeEngine engine)=>showDi
       const SizedBox(height:8),
       const Text('GitHub sign-in may be required. No app data is sent automatically.',
         textAlign:TextAlign.center,style:TextStyle(color:CinemaColors.muted,fontSize:11)),
+      TextButton(onPressed:()=>showDataCredits(ctx),child:const Text('Data credits')),
     ])),
     actions:[
       if(!engine.tv)TextButton(onPressed:()async{
@@ -82,6 +83,31 @@ Future<void> showReportProblem(BuildContext context,NativeEngine engine)=>showDi
       },child:const Text('Open in browser')),
       FilledButton(autofocus:true,onPressed:()=>Navigator.pop(ctx),child:const Text('Close')),
     ],
+  ));
+
+// Consolidated credits rather than a footer on every browsing screen.
+Future<void> showDataCredits(BuildContext context)=>showDialog<void>(
+  context:context,builder:(ctx)=>AlertDialog(
+    title:const Text('Data credits'),scrollable:true,
+    content:SizedBox(width:360,child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+      const Text('isme.gg',style:TextStyle(fontSize:28,fontWeight:FontWeight.w800)),
+      const SizedBox(height:16),
+      Image.network('https://upload.wikimedia.org/wikipedia/commons/thumb/8/89/Tmdb.new.logo.svg/330px-Tmdb.new.logo.svg.png',
+        height:54,fit:BoxFit.contain,semanticLabel:'The Movie Database logo',
+        errorBuilder:(_,__,___)=>const Text('The Movie Database (TMDB)',style:TextStyle(fontWeight:FontWeight.w700))),
+      const SizedBox(height:8),
+      const Text('This product uses the TMDB API but is not endorsed or certified by TMDB.'),
+      const SizedBox(height:6),
+      const SelectableText('https://www.themoviedb.org',style:TextStyle(color:CinemaColors.muted,fontSize:11)),
+      const SizedBox(height:12),
+      const Text('Streaming availability data: JustWatch via TMDB. Additional catalog metadata: Cinemeta.'),
+      const SizedBox(height:6),
+      const Text('Weekly rankings reflect TMDB trending order, not isme.gg viewing statistics.'),
+      const SizedBox(height:8),
+      const SelectableText('Logo: Travis Bell / TMDB, CC BY-SA 4.0. Unmodified artwork. https://creativecommons.org/licenses/by-sa/4.0/',
+        style:TextStyle(color:CinemaColors.muted,fontSize:10)),
+    ])),
+    actions:[FilledButton(autofocus:true,onPressed:()=>Navigator.pop(ctx),child:const Text('Close'))],
   ));
 
 Future<void> confirmClearLocalData(BuildContext context,NativeEngine engine) async {

@@ -85,11 +85,17 @@ final class PlatformCatalog {
             JSONObject m=raw.optJSONObject(i);if(m==null||m.optBoolean("adult"))continue;
             int id=m.optInt("id",0);String title=m.optString("title",""),date=m.optString("release_date","");
             if(id<=0||title.isEmpty())continue;
+            boolean animated=false;
+            JSONArray genres=m.optJSONArray("genre_ids");
+            if(genres!=null)for(int g=0;g<genres.length();g++)animated|=genres.optInt(g)==16;
             items.put(new JSONObject().put("id","tmdb:movie:"+id).put("tmdbId",id).put("type","Movie")
+                .put("pinoy",SeriesCatalog.country(m,"PH")||"tl".equals(m.optString("original_language")))
+                .put("animeFilm",animated&&(SeriesCatalog.country(m,"JP")||"ja".equals(m.optString("original_language"))))
                 .put("title",title).put("description",m.optString("overview",""))
                 .put("poster",SeriesCatalog.image(m,"poster_path","w342"))
                 .put("backdrop",SeriesCatalog.image(m,"backdrop_path","w1280"))
-                .put("year",date.length()>=4?date.substring(0,4):""));
+                .put("year",date.length()>=4?date.substring(0,4):"").put("releaseDate",date)
+                .put("ratingLabel",m.optDouble("vote_average",0)>0?String.format(java.util.Locale.US,"%.1f",m.optDouble("vote_average")):""));
         }
         return items;
     }
