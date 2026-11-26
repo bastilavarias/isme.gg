@@ -67,7 +67,7 @@ class _MyListState extends State<MyList>{
       Expanded(child:CinemaArt(m.poster.isEmpty?m.art:m.poster)),
       Padding(padding:const EdgeInsets.all(6),child:Text(m.title,maxLines:1,overflow:TextOverflow.ellipsis)),
     ])):GestureDetector(key:ValueKey('saved-${m.id}'),onLongPress:()=>menu(m),
-      child:MobilePoster(movie:m,engine:widget.engine,onOpen:()=>open(m)));
+      child:MobilePoster(movie:m,engine:widget.engine,onTap:()=>open(m)));
   @override Widget build(BuildContext context)=>ListenableBuilder(listenable:widget.store,builder:(context,_){
     final all=widget.store.movies,items=filtered(all),tv=widget.tv;
     final body=Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
