@@ -42,6 +42,7 @@ void main(){
   testWidgets('updated users can keep HTTP and acknowledge only once',(t)async{
     final p=await open(t);
     expect(find.text("You're up to date!"),findsOneWidget);
+    expect(find.text('🎉'),findsOneWidget);
     expect(find.text('Successfully updated to v0.2.0'),findsOneWidget);
     expect(t.widget<CheckboxListTile>(find.byType(CheckboxListTile).last).onChanged,isNull);
     await confirm(t);

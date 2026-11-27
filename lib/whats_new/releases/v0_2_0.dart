@@ -64,6 +64,8 @@ class _PlaybackUpdateDialogState extends State<PlaybackUpdateDialog> {
 
   @override Widget build(BuildContext context)=>WhatsNewDialog(
     version:widget.version,upgraded:widget.upgraded,busy:busy,onContinue:confirm,
+    headerGraphic:const Text('🎉',style:TextStyle(fontSize:44,fontFamily:'sans-serif',
+      fontFamilyFallback:['Noto Color Emoji'],height:1.2),semanticsLabel:'Celebration'),
     content:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
       label("WHAT'S NEW"),const SizedBox(height:8),
       const Text('A new playback experience.',style:TextStyle(fontSize:20,fontWeight:FontWeight.w700)),

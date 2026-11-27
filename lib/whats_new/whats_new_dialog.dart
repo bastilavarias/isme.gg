@@ -7,9 +7,11 @@ class WhatsNewDialog extends StatelessWidget {
   final String version;
   final bool upgraded, busy;
   final Widget content;
+  final Widget headerGraphic;
   final VoidCallback? onContinue;
   const WhatsNewDialog({super.key, required this.version, required this.upgraded,
-    required this.content, required this.onContinue, this.busy=false});
+    required this.content, required this.onContinue, this.busy=false,
+    this.headerGraphic=const Icon(Icons.check_circle_outline,size:44,color:Color(0xFF83C995))});
 
   @override Widget build(BuildContext context)=>PopScope(
     canPop:false,
@@ -23,7 +25,7 @@ class WhatsNewDialog extends StatelessWidget {
       scrollable:true,
       backgroundColor:CinemaColors.panel,
       title:Column(mainAxisSize:MainAxisSize.min,children:[
-        const Icon(Icons.check_circle_outline,size:44,color:Color(0xFF83C995)),
+        headerGraphic,
         const SizedBox(height:8),
         Text(upgraded?"You're up to date!":"Welcome to isme.gg",textAlign:TextAlign.center),
         const SizedBox(height:4),
