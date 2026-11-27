@@ -1,7 +1,7 @@
 # Playback Engine V2 — incremental reliability milestone
 
 ## Implemented foundation (not a rolling cache)
-- Keep the existing authenticated loopback origin, verified-piece reads, package ID, signing, Flutter player and 3 GiB selected-file cap.
+- Keep the existing authenticated loopback origin, verified-piece reads, package ID, signing, Flutter player and 7 GiB selected-file cap.
 - StorageBudget reserves 5% of the cache volume, clamped to 256 MiB–1 GiB, plus 64 MiB write headroom. Before opening a session, require another 64 MiB of available capacity. After metadata resolution, require the complete selected video to fit above that reserve; this is intentionally conservative and does not assume sparse-file allocation saves physical space.
 - Sample available storage every second on the native session thread monitor, even while the player is paused. Stop the matching session if the headroom is exhausted, invalidate the generation, and clean up after native stop succeeds. Monitoring is best-effort, not an atomic reservation: concurrent apps or writes between checks can still fill storage.
 - Low-storage errors are non-retryable device errors and display a free-space message. Existing files and metadata databases are not deleted by the storage guard.

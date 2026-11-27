@@ -35,6 +35,8 @@ void main() {
   test('diagnostic reasons retain known failures without leaking raw data', () {
     expect(safePlaybackDetail('Bad state: Video exceeds 3 GiB device cache limit'),
       'video exceeds 3 gib device cache limit');
+    expect(safePlaybackDetail('Bad state: Video exceeds 7 GiB device cache limit'),
+      'video exceeds 7 gib device cache limit');
     expect(safePlaybackDetail('Not enough free device storage for playback'),
       'not enough free device storage for playback');
     expect(safePlaybackDetail('HTTP 403 https://example.com/private?token=secret'),'HTTP 403');

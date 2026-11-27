@@ -22,7 +22,7 @@ import java.util.Locale;
  */
 final class MediaCatalog {
     static final String CINEMETA = "https://v3-cinemeta.strem.io";
-    static final long MAX_BYTES = 3L * 1024 * 1024 * 1024;
+    static final long MAX_BYTES = 7L * 1024 * 1024 * 1024;
 
     static JSONObject getJson(String address, int maxBytes) throws Exception {
         return getJson(address, maxBytes, 12000, 16000);

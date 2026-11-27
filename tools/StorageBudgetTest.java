@@ -14,6 +14,8 @@ public final class StorageBudgetTest {
         check(StorageBudget.canStart(1024*m,small),"adequate startup");
         check(!StorageBudget.fits(2500*m,1500*m,small),"reject oversized file on TV");
         check(StorageBudget.fits(700*m,1500*m,small),"accept smaller file");
+        check(StorageBudget.fits(7*1024*m,8790835200L,10411143160L),"7 GiB fits on test emulator");
+        check(!StorageBudget.fits(7*1024*m,7*1024*m,small),"7 GiB needs reserve and write headroom");
         check(!StorageBudget.fits(0,1500*m,small),"invalid size");
         check(StorageBudget.shouldStop(300*m,small),"reserve protection");
         check(!StorageBudget.shouldStop(1500*m,small),"healthy storage");

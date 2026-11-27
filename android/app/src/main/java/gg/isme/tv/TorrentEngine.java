@@ -308,7 +308,7 @@ final class TorrentEngine {
         if (picked < 0) throw new IOException("No playable video file found");
         inspectedVideoBytes = longest;
         if (longest > MediaCatalog.MAX_BYTES || longest <= 0)
-            throw new IOException("Video exceeds 3 GiB device cache limit");
+            throw new IOException("Video exceeds 7 GiB device cache limit");
 
         sampleStorage(activePath);
         if (!StorageBudget.fits(longest, usableBytes, totalBytes))
