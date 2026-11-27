@@ -12,7 +12,7 @@ class AppPreferences {
   static String language(String? code)=>languageAliases[code?.toLowerCase()]??'eng';
   static const sizes=['Small','Medium','Large','Extra large'];
   static const regions={'PH':'Philippines','US':'United States','GB':'United Kingdom','KR':'South Korea','JP':'Japan','SG':'Singapore','AU':'Australia','CA':'Canada'};
-  static bool nativeDirect(SharedPreferences p)=>p.getBool(nativeDirectKey)??false;
+  static bool nativeDirect(SharedPreferences p)=>p.getBool(nativeDirectKey)??true;
   static bool fastStartup(SharedPreferences p)=>p.getBool(fastStartupKey)??true;
   static bool adaptiveBuffering(SharedPreferences p)=>p.getBool(adaptiveBufferingKey)??true;
   static bool autoplay(SharedPreferences p)=>p.getBool(autoplayKey)??true;

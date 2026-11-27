@@ -13,6 +13,8 @@ void main(){
     final prefs=await SharedPreferences.getInstance();
     expect(AppPreferences.awake(prefs),isTrue);
     expect(AppPreferences.autoplay(prefs),isTrue);
+    expect(AppPreferences.nativeDirect(prefs),isTrue);
+    await prefs.setBool(AppPreferences.nativeDirectKey,false);
     expect(AppPreferences.nativeDirect(prefs),isFalse);
     await prefs.setBool(AppPreferences.nativeDirectKey,true);
     expect(AppPreferences.nativeDirect(prefs),isTrue);

@@ -96,7 +96,7 @@ class _SettingsPageState extends State<SettingsPage>{
             row(Icons.science_outlined,'Playback transport',()async{
               final value=await choose('Playback transport',{false:'Legacy HTTP',true:'Native Direct'},AppPreferences.nativeDirect(p));
               if(value!=null&&mounted)await saveBool(AppPreferences.nativeDirectKey,value);
-            },subtitle:'Optional experimental engine; applies to the next playback',
+            },subtitle:'Native Direct is the default; switch to Legacy HTTP anytime',
               trailing:Text(AppPreferences.nativeDirect(p)?'Native Direct':'Legacy HTTP')),
             if(AppPreferences.nativeDirect(p))...[
               toggle(Icons.speed,'Fast startup','Prioritize initial media data; optional experimental acceleration',AppPreferences.fastStartup(p),(v)=>saveBool(AppPreferences.fastStartupKey,v)),
@@ -122,7 +122,7 @@ class _SettingsPageState extends State<SettingsPage>{
             row(Icons.new_releases_outlined,"Preview What's New",()async{
               await WhatsNewController.show(context,p,version:engine.appVersion,code:engine.appVersionCode,upgraded:true,preview:true);
               if(mounted)setState((){});
-            },subtitle:'Development only; applies selections without marking the release seen'),
+            },subtitle:'Development only; previews without marking the release seen'),
           row(Icons.refresh,'Check for updates',(){appBackGate.block();Navigator.of(context).pop(true);},trailing:Text(installedVersion(engine))),
           row(Icons.report_problem_outlined,'Report a problem',()=>showReportProblem(context,engine)),
           row(Icons.info_outline,'About isme.gg',()=>showAboutDialog(context:context,applicationName:'isme.gg',applicationVersion:installedVersion(engine))),

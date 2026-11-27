@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../design.dart';
+import '../back_navigation.dart';
 
 /// Shared chrome only: each release owns its body and confirmation behavior.
 class WhatsNewDialog extends StatelessWidget {
@@ -13,8 +14,8 @@ class WhatsNewDialog extends StatelessWidget {
     required this.content, required this.onContinue, this.busy=false,
     this.headerGraphic=const Icon(Icons.check_circle_outline,size:44,color:Color(0xFF83C995))});
 
-  @override Widget build(BuildContext context)=>PopScope(
-    canPop:false,
+  @override Widget build(BuildContext context)=>BackNavigationScope(
+    onBack:(){if(!busy)onContinue?.call();},
     child:Shortcuts(shortcuts:const {
       SingleActivator(LogicalKeyboardKey.select,includeRepeats:false):ActivateIntent(),
       SingleActivator(LogicalKeyboardKey.enter,includeRepeats:false):ActivateIntent(),
@@ -34,6 +35,12 @@ class WhatsNewDialog extends StatelessWidget {
       ]),
       content:SizedBox(width:460,child:content),
       actions:[SizedBox(width:double.infinity,child:FilledButton(
+        autofocus:true,
+        style:ButtonStyle(
+          minimumSize:const WidgetStatePropertyAll(Size(0,48)),
+          side:WidgetStateProperty.resolveWith((states)=>BorderSide(
+            color:states.contains(WidgetState.focused)?CinemaColors.ink:Colors.transparent,width:3)),
+        ),
         onPressed:busy?null:onContinue,
         child:Text(busy?'Saving…':'Continue')))],
     )));
