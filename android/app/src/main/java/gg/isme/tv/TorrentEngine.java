@@ -56,6 +56,51 @@ final class TorrentEngine {
     private long preparedAt;
     private static final long PREPARATION_TTL_MS=30*60*1000L;
     private long sequence = 0L;
+    private long startedAt, resolvedAt = -1, metadataAt = -1, readyAt = -1;
+    private long usableBytes = -1, totalBytes = -1;
+    private static final String LOW_STORAGE = "Not enough free device storage for playback";
+    private static final long STORAGE_CHECK_MS = 1000L;
+
+    private long elapsed() {
+        return android.os.SystemClock.elapsedRealtime() - startedAt;
+    }
+
+    private void sampleStorage(File location) {
+        usableBytes = location.getUsableSpace();
+        totalBytes = location.getTotalSpace();
+    }
+
+    // Separate from player/status polling: storage safety remains active while
+    // the decoder is playing or paused. Never delete files of a live session.
+    private void monitorStorage(long token) {
+        Thread monitor = new Thread(() -> {
+            try {
+                while (!Thread.currentThread().isInterrupted()) {
+                    synchronized (lock) {
+                        if (token != sequence || session == null || activePath == null) return;
+                        sampleStorage(activePath);
+                        if (StorageBudget.shouldStop(usableBytes, totalBytes)) {
+                            failStorageLocked();
+                            return;
+                        }
+                    }
+                    Thread.sleep(STORAGE_CHECK_MS);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "isme-storage-monitor");
+        monitor.setDaemon(true);
+        monitor.start();
+    }
+
+    private void failStorageLocked() {
+        stopLocked();
+        sequence++;
+        status = "error";
+        error = LOW_STORAGE;
+        message = error;
+    }
     private final Object lock = new Object();
 
     TorrentEngine(File privateCache) {
@@ -103,6 +148,9 @@ final class TorrentEngine {
             }else{discardPreparationLocked();warmed=null;}
             stopLocked();
             token = ++sequence;
+            startedAt = android.os.SystemClock.elapsedRealtime();
+            resolvedAt = metadataAt = readyAt = -1;
+            usableBytes = totalBytes = -1;
             currentId = id;
             title = name;
             selectedSource = sourceIndex;
@@ -141,6 +189,7 @@ final class TorrentEngine {
                 MediaCatalog.Source chosen = found.get(selection);
                 synchronized (lock) {
                     if (token != sequence) return;
+                    resolvedAt = elapsed();
                     choices = found;
                     if (directMagnet == null || directMagnet.isEmpty()) {
                         choiceId = id; choiceSnapshot = new ArrayList<>(found);
@@ -151,9 +200,15 @@ final class TorrentEngine {
                     message = "Connecting to torrent peers...";
                     activePath = new File(root, "session-" + token);
                     if (!activePath.exists() && !activePath.mkdirs()) throw new IOException("Could not create private cache");
+                    sampleStorage(activePath);
+                    if (!StorageBudget.canStart(usableBytes, totalBytes)) {
+                        failStorageLocked();
+                        return;
+                    }
                     session = new SessionManager(false);
                     session.start();
                     session.download(chosen.magnet, activePath, new torrent_flags_t());
+                    monitorStorage(token);
                 }
             } catch (Throwable failure) {
                 synchronized (lock) {
@@ -175,8 +230,12 @@ final class TorrentEngine {
                 if (handle != null && handle.isValid()) {
                     TorrentInfo ti = handle.torrentFile();
                     if (ti != null && ti.isValid()) {
+                        metadataAt = elapsed();
                         try { prepareVideo(ti); }
-                        catch (Exception e) { status = "error"; error = e.getMessage() == null ? "Media validation failed" : e.getMessage(); message = error; }
+                        catch (Exception e) {
+                            if (LOW_STORAGE.equals(e.getMessage())) failStorageLocked();
+                            else { status = "error"; error = e.getMessage() == null ? "Media validation failed" : e.getMessage(); message = error; }
+                        }
                     }
                 }
             }
@@ -184,12 +243,18 @@ final class TorrentEngine {
                 int first = (int)(fileOffset / pieceLength);
                 if (handle.isValid() && handle.havePiece(first) && movieFile.isFile()) {
                     status = "ready";
+                    readyAt = elapsed();
                     message = "Ready to stream from peers";
                 }
             }
             JSONObject data = new JSONObject().put("id", currentId).put("title", title)
                 .put("status", status).put("message", message)
-                .put("selectedSource", selectedSource);
+                .put("selectedSource", selectedSource)
+                .put("timing", new JSONObject().put("resolvedMs", resolvedAt)
+                    .put("metadataMs", metadataAt).put("readyMs", readyAt))
+                .put("storage", new JSONObject().put("usableBytes", usableBytes)
+                    .put("reserveBytes", totalBytes > 0 ? StorageBudget.reserve(totalBytes) : -1)
+                    .put("selectedBytes", movieLength));
             JSONArray list = new JSONArray();
             for (MediaCatalog.Source source : choices) list.put(source.publicJson());
             data.put("sources", list);
@@ -236,6 +301,10 @@ final class TorrentEngine {
         if (picked < 0) throw new IOException("No playable video file found");
         if (longest > MediaCatalog.MAX_BYTES || longest <= 0)
             throw new IOException("Video exceeds 3 GiB device cache limit");
+
+        sampleStorage(activePath);
+        if (!StorageBudget.fits(longest, usableBytes, totalBytes))
+            throw new IOException(LOW_STORAGE);
 
         for (int i = 0; i < files.numFiles(); i++)
             handle.filePriority(i, i == picked ? Priority.DEFAULT : Priority.IGNORE);
@@ -333,8 +402,13 @@ final class TorrentEngine {
         message = "Choose a title to begin"; error = ""; imdbId = "";
         // Stop and delete asynchronously, outside the UI/main thread.
         if (previous != null) new Thread(() -> {
-            try { previous.stop(); } catch (Throwable e) { android.util.Log.w("IsmeTorrent", "Engine stop failed", e); }
-            if (oldPath != null) removeRecursively(oldPath);
+            try {
+                previous.stop();
+                if (oldPath != null) removeRecursively(oldPath);
+            } catch (Throwable e) {
+                // Do not remove data while a native session may still own it.
+                android.util.Log.w("IsmeTorrent", "Engine stop failed", e);
+            }
         }, "isme-torrent-cleanup").start();
         else if (oldPath != null) removeRecursively(oldPath);
     }

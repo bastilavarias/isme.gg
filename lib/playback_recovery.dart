@@ -15,7 +15,8 @@ PlaybackFault classifyPlaybackError(Object error) {
   if (text.contains('403') || text.contains('416') || text.contains('410') ||
       text.contains('invalid playback origin') || text.contains('cleartext') ||
       text.contains('permission denied') || text.contains('unsafe torrent') ||
-      text.contains('no space left') || text.contains('cache limit')) {
+      text.contains('no space left') || text.contains('cache limit') ||
+      text.contains('not enough free device storage')) {
     return PlaybackFault.internal;
   }
   if (text.contains('decoder') || text.contains('unsupported') ||

@@ -34,6 +34,7 @@ void main() {
 
   test('classifies known errors without guessing unknown causes', () {
     expect(classifyPlaybackError('HTTP 403'), PlaybackFault.internal);
+    expect(classifyPlaybackError('Not enough free device storage for playback'), PlaybackFault.internal);
     expect(classifyPlaybackError('unsupported decoder'), PlaybackFault.incompatible);
     expect(classifyPlaybackError('Media range response truncated'), PlaybackFault.transient);
     expect(classifyPlaybackError('Source error'), PlaybackFault.unknown);

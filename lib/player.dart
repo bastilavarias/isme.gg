@@ -191,6 +191,14 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   bool diagnostics=false;
   Map<String,dynamic> audio={}, nativeState={};
   final RecoveryBudget recovery=RecoveryBudget();
+  final Stopwatch startupClock=Stopwatch();
+  int? nativeReadyMs, probeMs, initializedMs, playRequestedMs, firstAdvanceMs;
+  bool checkingEngineHealth=false;
+  String? storageFailureMessage(Object failure){
+    final detail=failure.toString().toLowerCase();
+    return detail.contains('not enough free device storage')||detail.contains('no space left')
+      ?'Not enough free device storage. Free some space and retry playback.':null;
+  }
   Duration resume=Duration.zero, lastPosition=Duration.zero;
   DateTime lastAdvance=DateTime.now();
   List<Map<String,dynamic>> sources=[];
@@ -317,6 +325,8 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     final overall=DateTime.now().add(const Duration(minutes:4));
     while(active(n)){
       recovery.record(candidate);
+      startupClock..reset()..start();
+      nativeReadyMs=probeMs=initializedMs=playRequestedMs=firstAdvanceMs=null;
       setState((){source=candidate;phase=recovery.total>1?'Recovering playback':'Preparing media';progress=0;nativeState={};});
       try{
         await attempt(n,candidate,cancel,overall);
@@ -327,7 +337,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         final next=DateTime.now().isBefore(overall)?nextSource(classifyPlaybackError(e)):null;
         if(next==null){
           try{await widget.engine.stop();}catch(_){}
-          if(active(n))setState((){error='Unable to play this media after ${recovery.total} attempt(s). Retry or choose another source.';busy=false;phase='Stopped';});
+          if(active(n))setState((){error=storageFailureMessage(e)??'Unable to play this media after ${recovery.total} attempt(s). Retry or choose another source.';busy=false;phase='Stopped';});
           return;
         }
         candidate=next;
@@ -348,23 +358,29 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       if(state['sources'] is List && (state['sources'] as List).isNotEmpty) sources=(state['sources'] as List).whereType<Map<String,dynamic>>().toList();
       if(status=='error')throw StateError(state['error']?.toString()??'Could not open media');
       if(status=='ready'){
+        nativeReadyMs=startupClock.elapsedMilliseconds;
         setState(()=>phase='Validating stream');
         final path=state['streamUrl'] as String?;
         if(path==null||!path.startsWith('/stream/video'))throw const PlaybackFailure(PlaybackFault.internal,'Invalid media endpoint');
         final uri=widget.engine.url(path);
         await cancellable(widget.engine.probe(uri),cancel);
         if(!active(n))return;
+        probeMs=startupClock.elapsedMilliseconds;
         setState(()=>phase='Initializing player');
         final c=VideoPlayerController.networkUrl(uri,httpHeaders:widget.engine.headers);
         bool adopted=false;
         try{
           await cancellable(c.initialize().timeout(const Duration(seconds:45)),cancel);
           if(!active(n))return;
+          initializedMs=startupClock.elapsedMilliseconds;
           if(resume>Duration.zero&&resume<c.value.duration)await cancellable(c.seekTo(resume),cancel);
           if(!active(n))return;
           // Subtitle discovery and audio preference are applied after adoption; neither blocks startup.
           if(!active(n))return;
-          if(wantsPlayback)await cancellable(c.play(),cancel);
+          if(wantsPlayback){
+            playRequestedMs=startupClock.elapsedMilliseconds;
+            await cancellable(c.play(),cancel);
+          }
           if(!active(n))return;
           setState((){player=c;busy=false;phase='Playing';});
           adopted=true;
@@ -379,7 +395,8 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         }finally{if(!adopted)await c.dispose();}
       }
       setState((){phase='Preparing media';progress=((state['progress'] as num?)?.round()??0).clamp(0,100).toInt();});
-      await cancellable(Future<void>.delayed(const Duration(milliseconds:850)),cancel);
+      // Short readiness polling only during startup; keep the byte-range probe.
+      await cancellable(Future<void>.delayed(const Duration(milliseconds:250)),cancel);
     }
   }
   void monitor(VideoPlayerController c,int n){
@@ -388,7 +405,14 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(v.hasError){
       recoverRuntime(v.errorDescription??'Playback error');return;
     }
-    if(v.position!=lastPosition){lastPosition=v.position;resume=v.position;lastAdvance=DateTime.now();}
+    if(v.position!=lastPosition){
+      if(firstAdvanceMs==null&&wantsPlayback&&v.isPlaying&&v.position>lastPosition){
+        firstAdvanceMs=startupClock.elapsedMilliseconds;
+        startupClock.stop();
+      }
+      lastPosition=v.position;resume=v.position;lastAdvance=DateTime.now();
+    }
+    unawaited(checkEngineHealth(c,n));
     _sampleNext(c,n);
     if(v.isCompleted){wantsPlayback=false;syncPlaybackScreen(false);lastAdvance=DateTime.now();return;}
     if(!wantsPlayback){lastAdvance=DateTime.now();return;}
@@ -396,16 +420,32 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       recoverRuntime(const PlaybackFailure(PlaybackFault.transient,'Playback stalled'));
     }
   }
+  Future<void> checkEngineHealth(VideoPlayerController c,int n) async{
+    if(checkingEngineHealth)return;
+    checkingEngineHealth=true;
+    try{
+      final state=await widget.engine.status();
+      if(!active(n)||busy||!identical(player,c))return;
+      nativeState=state;
+      final failure=state['error']?.toString();
+      if(state['status']=='error'&&failure!=null&&storageFailureMessage(failure)!=null){
+        recoverRuntime(PlaybackFailure(PlaybackFault.internal,failure));
+      }else if(diagnostics&&mounted){
+        setState((){});
+      }
+    }catch(_){/* Existing player watchdog handles transport errors. */}
+    finally{checkingEngineHealth=false;}
+  }
   void recoverRuntime(Object failure){
     if(closed||busy)return;
     watchdog?.cancel();logFault(failure);
     final next=nextSource(classifyPlaybackError(failure));
     if(next!=null){unawaited(start(index:next,resetBudget:false));return;}
-    final job=stopAfterFailure();
+    final job=stopAfterFailure(message:storageFailureMessage(failure));
     pending=job;
     unawaited(job.whenComplete((){if(identical(pending,job))pending=null;}));
   }
-  Future<void> stopAfterFailure() async {
+  Future<void> stopAfterFailure({String? message}) async {
     if(closed||!mounted)return;
     syncPlaybackScreen(false);
     final n=++generation;cancelAttempt();saveTimer?.cancel();hide?.cancel();
@@ -413,7 +453,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     setState((){player=null;busy=true;phase='Stopping';});
     if(c!=null){rememberPosition(c);await save(c);await c.dispose();}
     try{await widget.engine.stop();}catch(_){}
-    if(active(n))setState((){busy=false;controls=true;phase='Stopped';error='Playback could not recover. Retry or choose another source.';});
+    if(active(n))setState((){busy=false;controls=true;phase='Stopped';error=message??'Playback could not recover. Retry or choose another source.';});
   }
   Future<void> showDiagnostics() async {
     if(!kDebugMode)return;
@@ -724,7 +764,15 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     final buffered=v?.buffered.where((r)=>r.start<=position&&r.end>=position).fold<int>(0,(max,r){
       final ms=(r.end-position).inMilliseconds;return ms>max?ms:max;
     })??0;
+    final timings=nativeState['timing'];
+    final storage=nativeState['storage'];
+    String ms(Object? value)=>value is num&&value>=0?'${value} ms':'—';
+    String mib(Object? value)=>value is num&&value>=0?'${(value/1048576).round()} MiB':'—';
     final rows=<String,String>{
+      'Resolve / metadata': '${ms(timings is Map?timings['resolvedMs']:null)} / ${ms(timings is Map?timings['metadataMs']:null)}',
+      'Ready / probe / init': '${ms(nativeReadyMs)} / ${ms(probeMs)} / ${ms(initializedMs)}',
+      'Play / first advance': '${ms(playRequestedMs)} / ${ms(firstAdvanceMs)}',
+      'Free / reserved': '${mib(storage is Map?storage['usableBytes']:null)} / ${mib(storage is Map?storage['reserveBytes']:null)}',
       'Phase':phase,'Attempts':'${recovery.total}/${RecoveryBudget.maxAttempts}',
       'Last error':lastFault,'Engine':nativeState['status']?.toString()??'—',
       'Resolution':v==null?'—':'${v.size.width.round()} × ${v.size.height.round()}',
