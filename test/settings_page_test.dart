@@ -13,6 +13,9 @@ void main(){
     final prefs=await SharedPreferences.getInstance();
     expect(AppPreferences.awake(prefs),isTrue);
     expect(AppPreferences.autoplay(prefs),isTrue);
+    expect(AppPreferences.nativeDirect(prefs),isFalse);
+    await prefs.setBool(AppPreferences.nativeDirectKey,true);
+    expect(AppPreferences.nativeDirect(prefs),isTrue);
     expect(AppPreferences.subtitles(prefs),'eng');
     expect(AppPreferences.languages.keys,['eng','fil','off']);
     expect(AppPreferences.language('tgl'),'fil');

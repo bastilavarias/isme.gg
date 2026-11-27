@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'app_preferences.dart';
@@ -89,6 +90,14 @@ class _SettingsPageState extends State<SettingsPage>{
           section('Playback'),
           toggle(Icons.play_circle_outline,'Autoplay next episode','Continue to the next episode automatically',AppPreferences.autoplay(p),(v)=>saveBool(AppPreferences.autoplayKey,v)),
           toggle(Icons.monitor_outlined,'Keep screen awake','Prevent sleep during playback',AppPreferences.awake(p),(v)=>saveBool(AppPreferences.awakeKey,v)),
+          if(kDebugMode)...[
+            section('Experimental playback'),
+            row(Icons.science_outlined,'Playback transport',()async{
+              final value=await choose('Playback transport',{false:'Legacy HTTP',true:'Native Direct'},AppPreferences.nativeDirect(p));
+              if(value!=null&&mounted)await saveBool(AppPreferences.nativeDirectKey,value);
+            },subtitle:'Debug benchmark only; applies to the next playback',
+              trailing:Text(AppPreferences.nativeDirect(p)?'Native Direct':'Legacy HTTP')),
+          ],
           section('Subtitles'),
           row(Icons.translate,'Preferred subtitle language',language,subtitle:'English or Filipino; availability varies',trailing:Text(AppPreferences.languages[AppPreferences.subtitles(p)]!)),
           row(Icons.format_size,'Subtitle size',size,trailing:Text(AppPreferences.sizes[AppPreferences.size(p)])),

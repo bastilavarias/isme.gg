@@ -257,6 +257,9 @@ class NativeEngine {
     }
     if (received != end + 1) throw StateError('Media range response truncated');
   }
+  Future<void> cancelDirectReads(String uri) async {
+    await channel.invokeMethod<void>('cancelDirectReads',{'uri':uri});
+  }
   Future<Map<String,dynamic>> audioDiagnostics() async =>
     await channel.invokeMapMethod<String,dynamic>('audioDiagnostics') ?? {};
   Future<void> stop() async { await json('/api/stop',body:{}); }

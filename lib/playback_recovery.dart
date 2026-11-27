@@ -38,6 +38,7 @@ PlaybackFault classifyPlaybackError(Object error) {
 String safePlaybackDetail(Object error) {
   final text=error.toString().toLowerCase();
   const reasons=[
+    'native direct unavailable', 'direct descriptor unavailable',
     'video exceeds 7 gib device cache limit',
     'video exceeds 3 gib device cache limit',
     'not enough free device storage for playback',

@@ -56,6 +56,7 @@ final class TorrentEngine {
     private long preparedAt;
     private static final long PREPARATION_TTL_MS=30*60*1000L;
     private long sequence = 0L;
+    private long directReadEpoch, cancelledDirectGeneration = -1;
     private long startedAt, resolvedAt = -1, metadataAt = -1, readyAt = -1;
     private long usableBytes = -1, totalBytes = -1, inspectedVideoBytes = -1;
     private String failureStage = "", failureType = "";
@@ -333,6 +334,98 @@ final class TorrentEngine {
     }
 
     long generation() { synchronized (lock) { return sequence; } }
+
+    /** A seekable, read-only view of one selected file in one generation.
+     * No socket, no unverified reads, no exposure of the cache path.
+     */
+    DirectReader openDirectReader(long expectedGeneration) throws IOException {
+        synchronized (lock) {
+            if (expectedGeneration != sequence || expectedGeneration == cancelledDirectGeneration ||
+                    !"ready".equals(status) || handle == null || movieFile == null || pieceLength <= 0)
+                throw new IOException("Movie not ready");
+            return new DirectReader(handle, new RandomAccessFile(movieFile, "r"),
+                fileOffset, pieceLength, movieLength, expectedGeneration, directReadEpoch);
+        }
+    }
+
+    void cancelDirectReaders(long expectedGeneration) {
+        synchronized (lock) {
+            if (expectedGeneration == sequence) {
+                directReadEpoch++;
+                cancelledDirectGeneration = expectedGeneration;
+            }
+        }
+    }
+
+    final class DirectReader implements java.io.Closeable {
+        private final TorrentHandle torrent;
+        private final RandomAccessFile file;
+        private final long offset, size, token, epoch;
+        private final int pieceSize;
+        private long nextOffset = -1;
+        private boolean closed;
+
+        DirectReader(TorrentHandle torrent, RandomAccessFile file, long offset,
+                int pieceSize, long size, long token, long epoch) {
+            this.torrent = torrent;
+            this.file = file;
+            this.offset = offset;
+            this.pieceSize = pieceSize;
+            this.size = size;
+            this.token = token;
+            this.epoch = epoch;
+        }
+
+        long size() { return size; }
+
+        // Android delivers callbacks serially per descriptor. Fill the entire
+        // requested range (except EOF); a short FUSE read can be zero-padded.
+        int read(long position, int requested, byte[] data) throws Exception {
+            if (closed || position < 0 || requested < 0 || requested > data.length)
+                throw new IOException("Invalid direct read");
+            synchronized (lock) {
+                if (token != sequence || epoch != directReadEpoch || torrent != handle || !torrent.isValid())
+                    throw new IOException("Playback changed");
+                if (position >= size || requested == 0) return 0;
+                if (position != nextOffset)
+                    torrent.setSequentialRange(Math.toIntExact((offset + position) / pieceSize));
+            }
+            int count = (int)Math.min((long)requested, size - position);
+            int received = 0;
+            long deadline = android.os.SystemClock.elapsedRealtime() + 35000;
+            file.seek(position);
+            while (received < count) {
+                long absolute = offset + position + received;
+                int piece = Math.toIntExact(absolute / pieceSize);
+                int chunk = Math.min(count - received, pieceSize - (int)(absolute % pieceSize));
+                while (true) {
+                    synchronized (lock) {
+                        if (token != sequence || epoch != directReadEpoch || torrent != handle || !torrent.isValid())
+                            throw new IOException("Playback changed");
+                        if (torrent.havePiece(piece)) break;
+                    }
+                    if (android.os.SystemClock.elapsedRealtime() >= deadline)
+                        throw new IOException("Media data deadline exceeded");
+                    Thread.sleep(125);
+                }
+                synchronized (lock) {
+                    if (token != sequence || epoch != directReadEpoch || torrent != handle)
+                        throw new IOException("Playback changed");
+                    file.readFully(data, received, chunk);
+                }
+                received += chunk;
+            }
+            nextOffset = position + received;
+            return received;
+        }
+
+        @Override public void close() throws IOException {
+            if (!closed) {
+                closed = true;
+                file.close();
+            }
+        }
+    }
     /** Called by localhost HTTP handlers; a stale request cannot read the next session. */
     void writeRange(long start, long end, long expectedGeneration, OutputStream output) throws Exception {
         TorrentHandle torrent;

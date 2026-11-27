@@ -89,6 +89,12 @@ public final class MainActivity extends FlutterActivity {
                         MetadataCredential.save(this,credential==null?"":credential);
                         result.success(null);
                     }catch(Exception e){result.error("CREDENTIAL","Could not save metadata credential",null);}
+                } else if ("cancelDirectReads".equals(call.method)) {
+                    if (BuildConfig.DEBUG) {
+                        String uri = call.argument("uri");
+                        if (uri != null) DirectMediaProvider.cancel(Uri.parse(uri));
+                    }
+                    result.success(null);
                 } else if ("audioDiagnostics".equals(call.method)) {
                     android.media.AudioManager audio = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
                     Map<String,Object> data = new HashMap<>();

@@ -58,6 +58,7 @@ final class LocalCinemaServer {
         acceptThread = new Thread(this::serve, "isme-local-http");
         acceptThread.setDaemon(true);
         acceptThread.start();
+        DirectMediaProvider.bind(torrents);
     }
 
     String url() { return "http://127.0.0.1:" + listener.getLocalPort() + "/"; }
@@ -179,7 +180,16 @@ final class LocalCinemaServer {
                 sendJson(out,200,new JSONObject().put("imdb",platforms.movieImdb(body.optInt("tmdbId",0),body.optString("token",""))));return;
             }
             if (path.equals("/api/status") && method.equals("GET")) {
-                sendJson(out, 200, torrents.state()); return;
+                JSONObject state = torrents.state();
+                if (BuildConfig.DEBUG && "ready".equals(state.optString("status"))) {
+                    String stream = state.optString("streamUrl");
+                    if (stream.startsWith("/stream/video?session=")) {
+                        long generation = Long.parseLong(stream.substring("/stream/video?session=".length()));
+                        android.net.Uri direct = DirectMediaProvider.uri(context, torrents, generation);
+                        if (direct != null) state.put("directUri", direct.toString());
+                    }
+                }
+                sendJson(out, 200, state); return;
             }
             if(path.equals("/api/next/prepare")&&method.equals("POST")){
                 JSONObject body=new JSONObject(new String(data,StandardCharsets.UTF_8));
@@ -321,6 +331,7 @@ final class LocalCinemaServer {
 
     void close() {
         running = false;
+        DirectMediaProvider.unbind(torrents);
         torrents.stop();
         try { listener.close(); } catch (IOException ignored) {}
         workers.shutdownNow();

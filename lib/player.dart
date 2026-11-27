@@ -172,7 +172,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     setState((){player=null;busy=true;phase='Opening next episode';controls=true;progress=0;});
     if(c!=null){
       await save(c);
-      try{await c.dispose();}catch(_){}
+      try{await disposePlayback(c);}catch(_){}
     }
     if(!active(n)||leaving)return;
     // Same player route and engine: dispose the old decoder before starting
@@ -196,6 +196,14 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   final Stopwatch startupClock=Stopwatch();
   int? nativeReadyMs, probeMs, initializedMs, playRequestedMs, firstAdvanceMs;
   bool checkingEngineHealth=false;
+  bool get nativeDirect=>kDebugMode&&AppPreferences.nativeDirect(widget.history.prefs);
+  String transport='http';
+  Future<void> disposePlayback(VideoPlayerController c) async {
+    if(c.dataSource.startsWith('content://')){
+      try{await widget.engine.cancelDirectReads(c.dataSource);}catch(_){}
+    }
+    await c.dispose();
+  }
   String? storageFailureMessage(Object failure){
     final detail=failure.toString().toLowerCase();
     return detail.contains('not enough free device storage')||detail.contains('no space left')
@@ -316,7 +324,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     final nativeType=identifier(nativeState['failureType']);
     final type=nativeType=='unknown'?identifier(e.runtimeType.toString()):nativeType;
     lastFailureDetail='$detail; stage=$stage; type=$type; selectedBytes=${number(storage is Map?storage['selectedBytes']:null)}; freeBytes=${number(storage is Map?storage['usableBytes']:null)}; reserveBytes=${number(storage is Map?storage['reserveBytes']:null)}; metadataMs=${number(timings is Map?timings['metadataMs']:null)}';
-    if(kDebugMode)debugPrint('IsmePlayback: phase=$phase category=$lastFault attempt=${recovery.total} elapsedMs=${startupClock.elapsedMilliseconds} $lastFailureDetail');
+    if(kDebugMode)debugPrint('IsmePlayback: transport=$transport phase=$phase category=$lastFault attempt=${recovery.total} elapsedMs=${startupClock.elapsedMilliseconds} $lastFailureDetail');
   }
   Future<void> start({int index=0,bool resetBudget=true}) async {
     if(closed||!mounted)return;
@@ -343,13 +351,15 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(previous!=null){
       rememberPosition(previous);
       if(active(n))setState(()=>player=null);else player=null;
-      await save(previous);await previous.dispose();
+      await save(previous);await disposePlayback(previous);
     }
     var candidate=index;
     final overall=DateTime.now().add(const Duration(minutes:4));
     while(active(n)){
       recovery.record(candidate);
       startupClock..reset()..start();
+      transport=nativeDirect?'direct':'http';
+      if(kDebugMode)debugPrint('IsmePlayback: transport=$transport stage=start attempt=${recovery.total} sourceIndex=$candidate');
       nativeReadyMs=probeMs=initializedMs=playRequestedMs=firstAdvanceMs=null;
       setState((){source=candidate;phase=recovery.total>1?'Recovering playback':'Preparing media';progress=0;nativeState={};});
       try{
@@ -387,11 +397,20 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         final path=state['streamUrl'] as String?;
         if(path==null||!path.startsWith('/stream/video'))throw const PlaybackFailure(PlaybackFault.internal,'Invalid media endpoint');
         final uri=widget.engine.url(path);
-        await cancellable(widget.engine.probe(uri),cancel);
-        if(!active(n))return;
-        probeMs=startupClock.elapsedMilliseconds;
+        final direct=transport=='direct';
+        final directUri=Uri.tryParse(state['directUri']?.toString()??'');
+        if(direct&&(directUri==null||directUri.scheme!='content'||!directUri.host.endsWith('.directmedia'))){
+          throw const PlaybackFailure(PlaybackFault.internal,'Native Direct unavailable');
+        }
+        if(!direct){
+          await cancellable(widget.engine.probe(uri),cancel);
+          if(!active(n))return;
+          probeMs=startupClock.elapsedMilliseconds;
+        }
         setState(()=>phase='Initializing player');
-        final c=VideoPlayerController.networkUrl(uri,httpHeaders:widget.engine.headers);
+        if(kDebugMode)debugPrint('IsmePlayback: transport=$transport stage=initialize attempt=${recovery.total} sourceIndex=$index selectedBytes=${state['bytes']} readyMs=$nativeReadyMs probeMs=$probeMs');
+        final c=direct?VideoPlayerController.contentUri(directUri!):
+          VideoPlayerController.networkUrl(uri,httpHeaders:widget.engine.headers);
         bool adopted=false;
         try{
           await cancellable(c.initialize().timeout(const Duration(seconds:45)),cancel);
@@ -416,7 +435,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
           unawaited(autoSubtitles(c,n));
           unawaited(applyAudioPreference(c,n));
           return;
-        }finally{if(!adopted)await c.dispose();}
+        }finally{if(!adopted)await disposePlayback(c);}
       }
       setState((){phase='Preparing media';progress=((state['progress'] as num?)?.round()??0).clamp(0,100).toInt();});
       // Short readiness polling only during startup; keep the byte-range probe.
@@ -433,6 +452,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       if(firstAdvanceMs==null&&wantsPlayback&&v.isPlaying&&v.position>lastPosition){
         firstAdvanceMs=startupClock.elapsedMilliseconds;
         startupClock.stop();
+        if(kDebugMode)debugPrint('IsmePlayback: transport=$transport result=playing attempt=${recovery.total} readyMs=$nativeReadyMs probeMs=$probeMs initializedMs=$initializedMs playMs=$playRequestedMs firstAdvanceMs=$firstAdvanceMs');
       }
       lastPosition=v.position;resume=v.position;lastAdvance=DateTime.now();
     }
@@ -475,7 +495,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     final n=++generation;cancelAttempt();saveTimer?.cancel();hide?.cancel();
     final c=player;
     setState((){player=null;busy=true;phase='Stopping';});
-    if(c!=null){rememberPosition(c);await save(c);await c.dispose();}
+    if(c!=null){rememberPosition(c);await save(c);await disposePlayback(c);}
     try{await widget.engine.stop();}catch(_){}
     if(active(n))setState((){busy=false;controls=true;phase='Stopped';error=message??'Playback could not recover. Retry or choose another source.';});
   }
@@ -766,7 +786,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   Future<void> shutdown() async {
     if(closed)return;syncPlaybackScreen(false);closed=true;generation++;subtitleRevision++;cancelAttempt();hide?.cancel();saveTimer?.cancel();watchdog?.cancel();_stopCountdown();_cancelPreparation();
     final c=player;player=null;
-    if(c!=null){await save(c);try{await c.dispose();}catch(_){}}
+    if(c!=null){await save(c);try{await disposePlayback(c);}catch(_){}}
     // Cancel engine while a pending initialization/poll is in flight.
     try{await widget.engine.stop();}catch(_){}
     final job=pending;if(job!=null){try{await job;}catch(_){}}
@@ -797,6 +817,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       'Ready / probe / init': '${ms(nativeReadyMs)} / ${ms(probeMs)} / ${ms(initializedMs)}',
       'Play / first advance': '${ms(playRequestedMs)} / ${ms(firstAdvanceMs)}',
       'Free / reserved': '${mib(storage is Map?storage['usableBytes']:null)} / ${mib(storage is Map?storage['reserveBytes']:null)}',
+      'Transport':transport,
       'Phase':phase,'Attempts':'${recovery.total}/${RecoveryBudget.maxAttempts}',
       'Last error':lastFault,'Engine':nativeState['status']?.toString()??'—',
       if(lastFailureDetail!=null)'Failure detail':lastFailureDetail!,
