@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../back_navigation.dart';
 import '../category_catalog.dart';
-import '../design.dart';
 import '../engine.dart';
 import '../platform_rail.dart';
 import 'mobile_widgets.dart';
