@@ -55,6 +55,16 @@ public final class DirectMediaProvider extends ContentProvider {
         }
     }
 
+    static void updateBuffer(Uri uri, boolean urgent) {
+        if (!BuildConfig.DEBUG || uri == null) return;
+        List<String> parts = uri.getPathSegments();
+        synchronized (LOCK) {
+            if (engine == null || parts.size() != 2 || !parts.get(0).equals(instance)) return;
+            try { engine.updateDirectBuffer(Long.parseLong(parts.get(1)), urgent); }
+            catch (NumberFormatException ignored) {}
+        }
+    }
+
     static void finishStartup(Uri uri) {
         if (!BuildConfig.DEBUG || uri == null) return;
         List<String> parts = uri.getPathSegments();
@@ -131,6 +141,8 @@ public final class DirectMediaProvider extends ContentProvider {
                             android.util.Log.w("IsmeDirect", reason + " offset=" + offset
                                 + " bytes=" + size + " waitMs=" + (android.os.SystemClock.elapsedRealtime() - start));
                             throw new ErrnoException("direct read", OsConstants.EIO);
+                        } finally {
+                            source.recordWait(android.os.SystemClock.elapsedRealtime() - start);
                         }
                     }
                     @Override public void onRelease() { cleanup.run(); }

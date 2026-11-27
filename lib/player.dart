@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'playback_recovery.dart';
+import 'adaptive_buffering.dart';
 import 'player_preferences.dart';
 import 'app_preferences.dart';
 import 'next_episode.dart';
@@ -198,7 +199,63 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   bool checkingEngineHealth=false;
   bool get nativeDirect=>kDebugMode&&AppPreferences.nativeDirect(widget.history.prefs);
   String transport='http';
-  bool fastStartup=false;
+  bool fastStartup=false, adaptiveBuffering=false, bufferUrgent=false;
+  int startupBufferTargetMs=0,startupBufferHoldMs=0,rebufferCount=0;
+  DateTime? rebufferSince;
+  int? bufferAheadMs(VideoPlayerValue v)=>AdaptiveBufferPolicy.aheadMs(
+    positionMs:v.position.inMilliseconds,
+    ranges:v.buffered.map((r)=>(startMs:r.start.inMilliseconds,endMs:r.end.inMilliseconds)));
+  Future<void> finishPriority(VideoPlayerController c) async{
+    try{await widget.engine.finishDirectStartup(c.dataSource).timeout(const Duration(seconds:1));}catch(_){}
+  }
+  Future<void> sendBufferUrgency(VideoPlayerController c,bool urgent) async{
+    try{await widget.engine.updateDirectBuffer(c.dataSource,urgent).timeout(const Duration(seconds:1));}catch(_){}
+  }
+  void sampleAdaptiveBuffer(VideoPlayerController c){
+    if(!kDebugMode)return;
+    final v=c.value,ahead=bufferAheadMs(c.value);
+    if(adaptiveBuffering){
+      final next=AdaptiveBufferPolicy.urgent(previous:bufferUrgent,
+        wantsPlayback:wantsPlayback&&_foreground&&!v.isCompleted,buffering:v.isBuffering,aheadMs:ahead);
+      if(next||bufferUrgent!=next)unawaited(sendBufferUrgency(c,next));
+      if(next!=bufferUrgent)debugPrint('IsmePlayback: buffer-urgency=$next aheadMs=$ahead buffering=${v.isBuffering}');
+      bufferUrgent=next;
+    }
+    final stalled=firstAdvanceMs!=null&&wantsPlayback&&_foreground&&!v.isCompleted&&v.isBuffering;
+    if(stalled&&rebufferSince==null){
+      rebufferSince=DateTime.now();rebufferCount++;
+      debugPrint('IsmePlayback: transport=$transport adaptiveBuffering=$adaptiveBuffering rebuffer-start count=$rebufferCount aheadMs=$ahead');
+    }else if(!stalled&&rebufferSince!=null){
+      debugPrint('IsmePlayback: transport=$transport adaptiveBuffering=$adaptiveBuffering rebuffer-end count=$rebufferCount sampledMs=${DateTime.now().difference(rebufferSince!).inMilliseconds}');
+      rebufferSince=null;
+    }
+  }
+  Future<void> prepareAdaptiveBuffer(VideoPlayerController c,int n,Completer<void> cancel,DateTime overall,bool resuming) async{
+    // A bounded, best-effort native status sample; never wait on network telemetry.
+    Map<String,dynamic> metrics={};
+    try{metrics=await cancellable(widget.engine.status().timeout(const Duration(milliseconds:600)),cancel);}catch(_){}
+    if(!active(n)||cancel.isCompleted||!wantsPlayback||!_foreground)return;
+    if(metrics['status']=='error')throw StateError(metrics['error']?.toString()??'Could not open media');
+    final wait=(metrics['directReadMaxWaitMs'] as num?)?.toInt()??0;
+    startupBufferTargetMs=AdaptiveBufferPolicy.startupTargetMs(readWaitMs:wait,
+      initMs:(initializedMs??0)-(nativeReadyMs??0),resuming:resuming);
+    final hold=Stopwatch()..start();
+    var announced=false;
+    while(active(n)&&!cancel.isCompleted&&wantsPlayback&&_foreground&&DateTime.now().isBefore(overall)){
+      final v=c.value;
+      if(v.hasError)throw StateError(v.errorDescription??'Playback error');
+      final ahead=bufferAheadMs(v);
+      if(!AdaptiveBufferPolicy.shouldHold(elapsedMs:hold.elapsedMilliseconds,aheadMs:ahead,
+        targetMs:startupBufferTargetMs,remainingMs:(v.duration-v.position).inMilliseconds,buffering:v.isBuffering))break;
+      if(!announced){
+        announced=true;
+        setState(()=>phase='Buffering startup');
+      }
+      await cancellable(Future<void>.delayed(const Duration(milliseconds:200)),cancel);
+    }
+    startupBufferHoldMs=hold.elapsedMilliseconds;
+    debugPrint('IsmePlayback: adaptive-startup targetMs=$startupBufferTargetMs heldMs=$startupBufferHoldMs aheadMs=${bufferAheadMs(c.value)} readWaitMs=$wait resuming=$resuming');
+  }
   Future<void> disposePlayback(VideoPlayerController c) async {
     if(c.dataSource.startsWith('content://')){
       try{await widget.engine.cancelDirectReads(c.dataSource);}catch(_){}
@@ -240,6 +297,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(phase=='Recovering playback')return 'Retrying playback…';
     if(phase=='Validating stream')return 'Checking playback…';
     if(phase=='Initializing player')return 'Starting playback…';
+    if(phase=='Buffering startup')return 'Buffering playback…';
     if(phase=='Stopping')return 'Closing playback…';
     switch(nativeState['status']){
       case 'resolving':return _movie.isEpisode?'Finding your episode…':'Finding your movie…';
@@ -361,7 +419,9 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       startupClock..reset()..start();
       transport=nativeDirect?'direct':'http';
       fastStartup=transport=='direct'&&AppPreferences.fastStartup(widget.history.prefs);
-      if(kDebugMode)debugPrint('IsmePlayback: transport=$transport fastStartup=$fastStartup stage=start attempt=${recovery.total} sourceIndex=$candidate');
+      adaptiveBuffering=transport=='direct'&&AppPreferences.adaptiveBuffering(widget.history.prefs);
+      bufferUrgent=false;rebufferSince=null;rebufferCount=0;startupBufferTargetMs=startupBufferHoldMs=0;
+      if(kDebugMode)debugPrint('IsmePlayback: transport=$transport fastStartup=$fastStartup adaptiveBuffering=$adaptiveBuffering stage=start attempt=${recovery.total} sourceIndex=$candidate');
       nativeReadyMs=probeMs=initializedMs=playRequestedMs=firstAdvanceMs=null;
       setState((){source=candidate;phase=recovery.total>1?'Recovering playback':'Preparing media';progress=0;nativeState={};});
       try{
@@ -384,7 +444,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   Future<void> attempt(int n,int index,Completer<void> cancel,DateTime overall) async {
     final deadline=DateTime.now().add(const Duration(seconds:65));
-    await widget.engine.start(_movie,magnet:widget.magnet,source:index,fastStartup:fastStartup);
+    await widget.engine.start(_movie,magnet:widget.magnet,source:index,fastStartup:fastStartup,adaptiveBuffering:adaptiveBuffering);
     while(active(n)){
       if(DateTime.now().isAfter(deadline)||DateTime.now().isAfter(overall))throw const PlaybackFailure(PlaybackFault.transient,'Media readiness deadline exceeded');
       final state=await cancellable(widget.engine.status(),cancel);
@@ -418,11 +478,14 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
           await cancellable(c.initialize().timeout(const Duration(seconds:45)),cancel);
           if(!active(n))return;
           initializedMs=startupClock.elapsedMilliseconds;
-          if(fastStartup&&direct){
-            try{await cancellable(widget.engine.finishDirectStartup(c.dataSource),cancel);}catch(_){}
-          }
+          if(fastStartup&&direct&&!adaptiveBuffering)await cancellable(finishPriority(c),cancel);
           if(!active(n))return;
-          if(resume>Duration.zero&&resume<c.value.duration)await cancellable(c.seekTo(resume),cancel);
+          final resuming=resume>Duration.zero&&resume<c.value.duration;
+          if(resuming)await cancellable(c.seekTo(resume),cancel);
+          if(!active(n))return;
+          if(adaptiveBuffering)await prepareAdaptiveBuffer(c,n,cancel,overall,resuming);
+          if(!active(n))return;
+          if(fastStartup&&adaptiveBuffering&&!wantsPlayback)await cancellable(finishPriority(c),cancel);
           if(!active(n))return;
           // Subtitle discovery and audio preference are applied after adoption; neither blocks startup.
           if(!active(n))return;
@@ -458,10 +521,12 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       if(firstAdvanceMs==null&&wantsPlayback&&v.isPlaying&&v.position>lastPosition){
         firstAdvanceMs=startupClock.elapsedMilliseconds;
         startupClock.stop();
-        if(kDebugMode)debugPrint('IsmePlayback: transport=$transport fastStartup=$fastStartup result=playing attempt=${recovery.total} readyMs=$nativeReadyMs probeMs=$probeMs initializedMs=$initializedMs playMs=$playRequestedMs firstAdvanceMs=$firstAdvanceMs');
+        if(fastStartup&&adaptiveBuffering)unawaited(finishPriority(c));
+        if(kDebugMode)debugPrint('IsmePlayback: transport=$transport fastStartup=$fastStartup adaptiveBuffering=$adaptiveBuffering result=playing attempt=${recovery.total} readyMs=$nativeReadyMs probeMs=$probeMs initializedMs=$initializedMs playMs=$playRequestedMs firstAdvanceMs=$firstAdvanceMs startupBufferTargetMs=$startupBufferTargetMs startupBufferHoldMs=$startupBufferHoldMs');
       }
       lastPosition=v.position;resume=v.position;lastAdvance=DateTime.now();
     }
+    sampleAdaptiveBuffer(c);
     unawaited(checkEngineHealth(c,n));
     _sampleNext(c,n);
     if(v.isCompleted){wantsPlayback=false;syncPlaybackScreen(false);lastAdvance=DateTime.now();return;}
@@ -615,6 +680,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   Future<void> setPlaying(bool value) async{
     final c=player;if(c==null||closed||busy)return;
     wantsPlayback=value;lastAdvance=DateTime.now();
+    if(!value&&adaptiveBuffering){bufferUrgent=false;unawaited(sendBufferUrgency(c,false));if(fastStartup)unawaited(finishPriority(c));}
     syncPlaybackScreen(value);
     if(!value){_stopCountdown();_nextGate.reset();_cancelPreparation();if(c.value.isCompleted)setState(()=>_nextDismissed=true);}
     try{
@@ -786,7 +852,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   @override void didChangeAppLifecycleState(AppLifecycleState state){
     _foreground=state==AppLifecycleState.resumed;
-    if(!_foreground){syncPlaybackScreen(false);_stopCountdown();_nextGate.reset();_cancelPreparation();wantsPlayback=false;final c=player;if(c!=null){unawaited(c.pause());unawaited(save(c));}}
+    if(!_foreground){syncPlaybackScreen(false);_stopCountdown();_nextGate.reset();_cancelPreparation();wantsPlayback=false;final c=player;if(c!=null){if(adaptiveBuffering){bufferUrgent=false;unawaited(sendBufferUrgency(c,false));if(fastStartup)unawaited(finishPriority(c));}unawaited(c.pause());unawaited(save(c));}}
     if(mounted&&!closed)setState((){});
   }
   Future<void> shutdown() async {
@@ -824,6 +890,8 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       'Play / first advance': '${ms(playRequestedMs)} / ${ms(firstAdvanceMs)}',
       'Free / reserved': '${mib(storage is Map?storage['usableBytes']:null)} / ${mib(storage is Map?storage['reserveBytes']:null)}',
       'Transport':transport,
+      if(adaptiveBuffering)'Adaptive buffer':'${startupBufferTargetMs} ms target / ${startupBufferHoldMs} ms hold',
+      if(adaptiveBuffering)'Buffer urgency / stalls':'$bufferUrgent / $rebufferCount',
       'Phase':phase,'Attempts':'${recovery.total}/${RecoveryBudget.maxAttempts}',
       'Last error':lastFault,'Engine':nativeState['status']?.toString()??'—',
       if(lastFailureDetail!=null)'Failure detail':lastFailureDetail!,

@@ -19,6 +19,9 @@ void main(){
     expect(AppPreferences.fastStartup(prefs),isTrue);
     await prefs.setBool(AppPreferences.fastStartupKey,false);
     expect(AppPreferences.fastStartup(prefs),isFalse);
+    expect(AppPreferences.adaptiveBuffering(prefs),isTrue);
+    await prefs.setBool(AppPreferences.adaptiveBufferingKey,false);
+    expect(AppPreferences.adaptiveBuffering(prefs),isFalse);
     expect(AppPreferences.subtitles(prefs),'eng');
     expect(AppPreferences.languages.keys,['eng','fil','off']);
     expect(AppPreferences.language('tgl'),'fil');

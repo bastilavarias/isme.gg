@@ -5,7 +5,8 @@ class AppPreferences {
   static const autoplayKey='isme-autoplay-next', awakeKey='isme-keep-screen-awake',
     subtitleLanguageKey='isme-subtitle-language', subtitleSizeKey='isme-subtitle-size',
     regionKey='isme-provider-country', soundKey='isme-navigation-sounds',
-    nativeDirectKey='isme-experimental-native-direct', fastStartupKey='isme-experimental-fast-startup';
+    nativeDirectKey='isme-experimental-native-direct', fastStartupKey='isme-experimental-fast-startup',
+    adaptiveBufferingKey='isme-experimental-adaptive-buffering';
   static const languages={'eng':'English','fil':'Filipino','off':'Off'};
   static const languageAliases={'en':'eng','eng':'eng','fil':'fil','tgl':'fil','tl':'fil','off':'off'};
   static String language(String? code)=>languageAliases[code?.toLowerCase()]??'eng';
@@ -13,6 +14,7 @@ class AppPreferences {
   static const regions={'PH':'Philippines','US':'United States','GB':'United Kingdom','KR':'South Korea','JP':'Japan','SG':'Singapore','AU':'Australia','CA':'Canada'};
   static bool nativeDirect(SharedPreferences p)=>p.getBool(nativeDirectKey)??false;
   static bool fastStartup(SharedPreferences p)=>p.getBool(fastStartupKey)??true;
+  static bool adaptiveBuffering(SharedPreferences p)=>p.getBool(adaptiveBufferingKey)??true;
   static bool autoplay(SharedPreferences p)=>p.getBool(autoplayKey)??true;
   static bool awake(SharedPreferences p)=>p.getBool(awakeKey)??true;
   static bool sounds(SharedPreferences p)=>p.getBool(soundKey)??false;

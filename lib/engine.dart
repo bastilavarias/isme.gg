@@ -220,8 +220,8 @@ class NativeEngine {
   }
   Future<List<Movie>> catalog(String collection, {String query = ''}) async =>
     (await catalogSnapshot(collection,query:query)).movies;
-  Future<void> start(Movie movie, {String magnet = '', int source = 0, bool fastStartup = false}) async {
-    await json('/api/play',body:{'id':movie.id,'title':movie.title,'magnet':magnet,'sourceIndex':source,if(fastStartup)'fastStartup':true,if(movie.isEpisode&&movie.id.startsWith('tmdb:tv:'))'tmdbToken':_providerToken});
+  Future<void> start(Movie movie, {String magnet = '', int source = 0, bool fastStartup = false, bool adaptiveBuffering = false}) async {
+    await json('/api/play',body:{'id':movie.id,'title':movie.title,'magnet':magnet,'sourceIndex':source,if(fastStartup)'fastStartup':true,if(adaptiveBuffering)'adaptiveBuffering':true,if(movie.isEpisode&&movie.id.startsWith('tmdb:tv:'))'tmdbToken':_providerToken});
   }
   Future<void> prepareNext(Movie current,Movie next) async {
     if(!current.isEpisode||!next.isEpisode)return;
@@ -256,6 +256,9 @@ class NativeEngine {
       if (received > end + 1) throw StateError('Media range response too long');
     }
     if (received != end + 1) throw StateError('Media range response truncated');
+  }
+  Future<void> updateDirectBuffer(String uri,bool urgent) async {
+    await channel.invokeMethod<void>('updateDirectBuffer',{'uri':uri,'urgent':urgent});
   }
   Future<void> finishDirectStartup(String uri) async {
     await channel.invokeMethod<void>('finishDirectStartup',{'uri':uri});

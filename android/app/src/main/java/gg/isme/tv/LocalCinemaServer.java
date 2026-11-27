@@ -224,7 +224,8 @@ final class LocalCinemaServer {
                 }
                 subtitles.reset();
                 torrents.start(id, body.optString("title", id), body.optInt("sourceIndex", 0), magnet,episodeKey,
-                    BuildConfig.DEBUG && body.optBoolean("fastStartup", false));
+                    BuildConfig.DEBUG && body.optBoolean("fastStartup", false),
+                    BuildConfig.DEBUG && body.optBoolean("adaptiveBuffering", false));
                 sendJson(out, 202, new JSONObject().put("status", "loading")); return;
             }
             if (path.equals("/api/stop") && method.equals("POST")) {

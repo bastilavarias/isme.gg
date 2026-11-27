@@ -57,7 +57,9 @@ final class TorrentEngine {
     private static final long PREPARATION_TTL_MS=30*60*1000L;
     private long sequence = 0L;
     private long directReadEpoch, cancelledDirectGeneration = -1;
-    private boolean fastStartup;
+    private boolean fastStartup, adaptiveBuffering;
+    private long runtimeUrgentUntil, directReadMaxWaitMs;
+    private static final long BUFFER_URGENCY_LEASE_MS = 6500;
     private StartupPieceWindow startupWindow;
     private long startedAt, resolvedAt = -1, metadataAt = -1, readyAt = -1;
     private long usableBytes = -1, totalBytes = -1, inspectedVideoBytes = -1;
@@ -82,6 +84,7 @@ final class TorrentEngine {
                 while (!Thread.currentThread().isInterrupted()) {
                     synchronized (lock) {
                         if (token != sequence || session == null || activePath == null) return;
+                        expireBufferUrgencyLocked();
                         sampleStorage(activePath);
                         if (StorageBudget.shouldStop(usableBytes, totalBytes)) {
                             failStorageLocked();
@@ -136,7 +139,7 @@ final class TorrentEngine {
         if(nextCandidates!=null)nextCandidates.cancel(true);
         nextCandidates=null;preparedId="";preparedAt=0;
     }
-    void start(String id, String name, int sourceIndex, String directMagnet, String episodeKey, boolean fastStart) {
+    void start(String id, String name, int sourceIndex, String directMagnet, String episodeKey, boolean fastStart, boolean adaptive) {
         final long token;
         final List<MediaCatalog.Source> prior;
         final FutureTask<List<MediaCatalog.Source>> warmed;
@@ -155,6 +158,8 @@ final class TorrentEngine {
             stopLocked();
             token = ++sequence;
             fastStartup = fastStart;
+            adaptiveBuffering = adaptive;
+            directReadMaxWaitMs = 0;
             startedAt = android.os.SystemClock.elapsedRealtime();
             resolvedAt = metadataAt = readyAt = -1;
             usableBytes = totalBytes = inspectedVideoBytes = -1;
@@ -260,6 +265,7 @@ final class TorrentEngine {
             JSONObject data = new JSONObject().put("id", currentId).put("title", title)
                 .put("status", status).put("message", message)
                 .put("selectedSource", selectedSource)
+                .put("directReadMaxWaitMs", directReadMaxWaitMs)
                 .put("failureStage", failureStage).put("failureType", failureType)
                 .put("timing", new JSONObject().put("resolvedMs", resolvedAt)
                     .put("metadataMs", metadataAt).put("readyMs", readyAt))
@@ -340,8 +346,9 @@ final class TorrentEngine {
     /** Keep the existing readiness gate. Deadline hints are best effort and
      * never permit unverified reads or delay handing the file to Media3. */
     private void scheduleStartupLocked(long position) {
-        if (!fastStartup || handle == null || !handle.isValid()) return;
-        if (elapsed() >= 110000) { finishStartupLocked(); return; }
+        expireBufferUrgencyLocked();
+        if (fastStartup && elapsed() >= 110000) finishStartupLocked();
+        if ((!fastStartup && runtimeUrgentUntil == 0) || handle == null || !handle.isValid()) return;
         try {
             int piece = Math.toIntExact((fileOffset + position) / pieceLength);
             if (startupWindow != null && startupWindow.covers(piece)) return;
@@ -356,24 +363,51 @@ final class TorrentEngine {
                     missing++;
                 }
             }
-            android.util.Log.d("IsmeDirect", "startup-window first=" + next.first +
+            android.util.Log.d("IsmeDirect", (fastStartup ? "startup-window" : "buffer-window") + " first=" + next.first +
                 " last=" + next.last + " missing=" + missing + " elapsedMs=" + elapsed());
         } catch (RuntimeException | LinkageError failure) {
             finishStartupLocked();
-            android.util.Log.w("IsmeDirect", "startup-window-disabled type=" + failure.getClass().getSimpleName());
+            adaptiveBuffering = false;
+            runtimeUrgentUntil = 0;
+            clearPriorityWindowLocked();
+            android.util.Log.w("IsmeDirect", "priority-window-disabled type=" + failure.getClass().getSimpleName());
         }
     }
 
     private void finishStartupLocked() {
         if (!fastStartup) return;
         fastStartup = false;
+        clearPriorityWindowLocked();
+        android.util.Log.d("IsmeDirect", "startup-window-finished elapsedMs=" + elapsed());
+    }
+
+    private void clearPriorityWindowLocked() {
         try {
             if (startupWindow != null && handle != null && handle.isValid()) handle.clearPieceDeadlines();
         } catch (RuntimeException | LinkageError ignored) {
-            android.util.Log.w("IsmeDirect", "startup-window-clear-failed");
+            android.util.Log.w("IsmeDirect", "priority-window-clear-failed");
         }
         startupWindow = null;
-        android.util.Log.d("IsmeDirect", "startup-window-finished elapsedMs=" + elapsed());
+    }
+
+    private void expireBufferUrgencyLocked() {
+        if (runtimeUrgentUntil != 0 && android.os.SystemClock.elapsedRealtime() >= runtimeUrgentUntil) {
+            runtimeUrgentUntil = 0;
+            if (!fastStartup) clearPriorityWindowLocked();
+        }
+    }
+
+    void updateDirectBuffer(long expectedGeneration, boolean urgent) {
+        synchronized (lock) {
+            if (expectedGeneration != sequence || !adaptiveBuffering || !"ready".equals(status)
+                    || expectedGeneration == cancelledDirectGeneration) return;
+            expireBufferUrgencyLocked();
+            boolean wasUrgent = runtimeUrgentUntil != 0;
+            runtimeUrgentUntil = urgent ? android.os.SystemClock.elapsedRealtime() + BUFFER_URGENCY_LEASE_MS : 0;
+            if (!urgent && wasUrgent && !fastStartup) clearPriorityWindowLocked();
+            if (urgent != wasUrgent)
+                android.util.Log.d("IsmeDirect", "buffer-urgency=" + urgent);
+        }
     }
 
     void finishDirectStartup(long expectedGeneration) {
@@ -401,6 +435,8 @@ final class TorrentEngine {
         synchronized (lock) {
             if (expectedGeneration == sequence) {
                 finishStartupLocked();
+                runtimeUrgentUntil = 0;
+                clearPriorityWindowLocked();
                 directReadEpoch++;
                 cancelledDirectGeneration = expectedGeneration;
             }
@@ -428,6 +464,13 @@ final class TorrentEngine {
 
         long size() { return size; }
 
+        void recordWait(long waitMs) {
+            synchronized (lock) {
+                if (adaptiveBuffering && token == sequence && epoch == directReadEpoch && torrent == handle)
+                    directReadMaxWaitMs = Math.max(directReadMaxWaitMs, waitMs);
+            }
+        }
+
         // Android delivers callbacks serially per descriptor. Fill the entire
         // requested range (except EOF); a short FUSE read can be zero-padded.
         int read(long position, int requested, byte[] data) throws Exception {
@@ -439,7 +482,7 @@ final class TorrentEngine {
                 if (position >= size || requested == 0) return 0;
                 if (position != nextOffset)
                     torrent.setSequentialRange(Math.toIntExact((offset + position) / pieceSize));
-                if (fastStartup) scheduleStartupLocked(position);
+                if (fastStartup || runtimeUrgentUntil != 0) scheduleStartupLocked(position);
             }
             int count = (int)Math.min((long)requested, size - position);
             int received = 0;
@@ -454,7 +497,7 @@ final class TorrentEngine {
                         if (token != sequence || epoch != directReadEpoch || torrent != handle || !torrent.isValid())
                             throw new IOException("Playback changed");
                         if (torrent.havePiece(piece)) break;
-                        if (fastStartup) scheduleStartupLocked(position + received);
+                        if (fastStartup || runtimeUrgentUntil != 0) scheduleStartupLocked(position + received);
                     }
                     if (android.os.SystemClock.elapsedRealtime() >= deadline)
                         throw new IOException("Media data deadline exceeded");
@@ -547,6 +590,8 @@ final class TorrentEngine {
 
     private void stopLocked() {
         fastStartup = false;
+        adaptiveBuffering = false;
+        runtimeUrgentUntil = 0;
         startupWindow = null;
         SessionManager previous = session;
         File oldPath = activePath;
