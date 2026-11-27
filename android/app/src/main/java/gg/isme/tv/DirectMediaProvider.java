@@ -55,6 +55,16 @@ public final class DirectMediaProvider extends ContentProvider {
         }
     }
 
+    static void finishStartup(Uri uri) {
+        if (!BuildConfig.DEBUG || uri == null) return;
+        List<String> parts = uri.getPathSegments();
+        synchronized (LOCK) {
+            if (engine == null || parts.size() != 2 || !parts.get(0).equals(instance)) return;
+            try { engine.finishDirectStartup(Long.parseLong(parts.get(1))); }
+            catch (NumberFormatException ignored) {}
+        }
+    }
+
     static void cancel(Uri uri) {
         if (!BuildConfig.DEBUG || uri == null) return;
         List<String> parts = uri.getPathSegments();

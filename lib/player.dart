@@ -198,6 +198,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   bool checkingEngineHealth=false;
   bool get nativeDirect=>kDebugMode&&AppPreferences.nativeDirect(widget.history.prefs);
   String transport='http';
+  bool fastStartup=false;
   Future<void> disposePlayback(VideoPlayerController c) async {
     if(c.dataSource.startsWith('content://')){
       try{await widget.engine.cancelDirectReads(c.dataSource);}catch(_){}
@@ -324,7 +325,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     final nativeType=identifier(nativeState['failureType']);
     final type=nativeType=='unknown'?identifier(e.runtimeType.toString()):nativeType;
     lastFailureDetail='$detail; stage=$stage; type=$type; selectedBytes=${number(storage is Map?storage['selectedBytes']:null)}; freeBytes=${number(storage is Map?storage['usableBytes']:null)}; reserveBytes=${number(storage is Map?storage['reserveBytes']:null)}; metadataMs=${number(timings is Map?timings['metadataMs']:null)}';
-    if(kDebugMode)debugPrint('IsmePlayback: transport=$transport phase=$phase category=$lastFault attempt=${recovery.total} elapsedMs=${startupClock.elapsedMilliseconds} $lastFailureDetail');
+    if(kDebugMode)debugPrint('IsmePlayback: transport=$transport fastStartup=$fastStartup phase=$phase category=$lastFault attempt=${recovery.total} elapsedMs=${startupClock.elapsedMilliseconds} $lastFailureDetail');
   }
   Future<void> start({int index=0,bool resetBudget=true}) async {
     if(closed||!mounted)return;
@@ -359,7 +360,8 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       recovery.record(candidate);
       startupClock..reset()..start();
       transport=nativeDirect?'direct':'http';
-      if(kDebugMode)debugPrint('IsmePlayback: transport=$transport stage=start attempt=${recovery.total} sourceIndex=$candidate');
+      fastStartup=transport=='direct'&&AppPreferences.fastStartup(widget.history.prefs);
+      if(kDebugMode)debugPrint('IsmePlayback: transport=$transport fastStartup=$fastStartup stage=start attempt=${recovery.total} sourceIndex=$candidate');
       nativeReadyMs=probeMs=initializedMs=playRequestedMs=firstAdvanceMs=null;
       setState((){source=candidate;phase=recovery.total>1?'Recovering playback':'Preparing media';progress=0;nativeState={};});
       try{
@@ -382,7 +384,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   }
   Future<void> attempt(int n,int index,Completer<void> cancel,DateTime overall) async {
     final deadline=DateTime.now().add(const Duration(seconds:65));
-    await widget.engine.start(_movie,magnet:widget.magnet,source:index);
+    await widget.engine.start(_movie,magnet:widget.magnet,source:index,fastStartup:fastStartup);
     while(active(n)){
       if(DateTime.now().isAfter(deadline)||DateTime.now().isAfter(overall))throw const PlaybackFailure(PlaybackFault.transient,'Media readiness deadline exceeded');
       final state=await cancellable(widget.engine.status(),cancel);
@@ -416,6 +418,10 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
           await cancellable(c.initialize().timeout(const Duration(seconds:45)),cancel);
           if(!active(n))return;
           initializedMs=startupClock.elapsedMilliseconds;
+          if(fastStartup&&direct){
+            try{await cancellable(widget.engine.finishDirectStartup(c.dataSource),cancel);}catch(_){}
+          }
+          if(!active(n))return;
           if(resume>Duration.zero&&resume<c.value.duration)await cancellable(c.seekTo(resume),cancel);
           if(!active(n))return;
           // Subtitle discovery and audio preference are applied after adoption; neither blocks startup.
@@ -452,7 +458,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       if(firstAdvanceMs==null&&wantsPlayback&&v.isPlaying&&v.position>lastPosition){
         firstAdvanceMs=startupClock.elapsedMilliseconds;
         startupClock.stop();
-        if(kDebugMode)debugPrint('IsmePlayback: transport=$transport result=playing attempt=${recovery.total} readyMs=$nativeReadyMs probeMs=$probeMs initializedMs=$initializedMs playMs=$playRequestedMs firstAdvanceMs=$firstAdvanceMs');
+        if(kDebugMode)debugPrint('IsmePlayback: transport=$transport fastStartup=$fastStartup result=playing attempt=${recovery.total} readyMs=$nativeReadyMs probeMs=$probeMs initializedMs=$initializedMs playMs=$playRequestedMs firstAdvanceMs=$firstAdvanceMs');
       }
       lastPosition=v.position;resume=v.position;lastAdvance=DateTime.now();
     }

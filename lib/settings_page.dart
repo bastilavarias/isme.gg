@@ -97,6 +97,7 @@ class _SettingsPageState extends State<SettingsPage>{
               if(value!=null&&mounted)await saveBool(AppPreferences.nativeDirectKey,value);
             },subtitle:'Debug benchmark only; applies to the next playback',
               trailing:Text(AppPreferences.nativeDirect(p)?'Native Direct':'Legacy HTTP')),
+            if(AppPreferences.nativeDirect(p))toggle(Icons.speed,'Fast startup','Prioritize initial media data; disable for baseline tests',AppPreferences.fastStartup(p),(v)=>saveBool(AppPreferences.fastStartupKey,v)),
           ],
           section('Subtitles'),
           row(Icons.translate,'Preferred subtitle language',language,subtitle:'English or Filipino; availability varies',trailing:Text(AppPreferences.languages[AppPreferences.subtitles(p)]!)),

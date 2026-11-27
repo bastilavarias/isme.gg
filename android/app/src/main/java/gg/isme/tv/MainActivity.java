@@ -89,6 +89,12 @@ public final class MainActivity extends FlutterActivity {
                         MetadataCredential.save(this,credential==null?"":credential);
                         result.success(null);
                     }catch(Exception e){result.error("CREDENTIAL","Could not save metadata credential",null);}
+                } else if ("finishDirectStartup".equals(call.method)) {
+                    if (BuildConfig.DEBUG) {
+                        String uri = call.argument("uri");
+                        if (uri != null) DirectMediaProvider.finishStartup(Uri.parse(uri));
+                    }
+                    result.success(null);
                 } else if ("cancelDirectReads".equals(call.method)) {
                     if (BuildConfig.DEBUG) {
                         String uri = call.argument("uri");

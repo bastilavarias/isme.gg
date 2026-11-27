@@ -16,6 +16,9 @@ void main(){
     expect(AppPreferences.nativeDirect(prefs),isFalse);
     await prefs.setBool(AppPreferences.nativeDirectKey,true);
     expect(AppPreferences.nativeDirect(prefs),isTrue);
+    expect(AppPreferences.fastStartup(prefs),isTrue);
+    await prefs.setBool(AppPreferences.fastStartupKey,false);
+    expect(AppPreferences.fastStartup(prefs),isFalse);
     expect(AppPreferences.subtitles(prefs),'eng');
     expect(AppPreferences.languages.keys,['eng','fil','off']);
     expect(AppPreferences.language('tgl'),'fil');
