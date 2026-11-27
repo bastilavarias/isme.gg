@@ -57,7 +57,9 @@ void main(){
     final p=await open(t,upgraded:false);
     expect(find.text('Welcome to isme.gg'),findsOneWidget);
     await toggle(t,'Enable Native Direct');
+    expect(t.widget<CheckboxListTile>(find.byType(CheckboxListTile).last).value,isFalse);
     await toggle(t,'Enable Fast Startup');
+    expect(t.widget<CheckboxListTile>(find.byType(CheckboxListTile).last).value,isTrue);
     expect(AppPreferences.nativeDirect(p),isFalse);
     expect(p.containsKey(WhatsNewController.acknowledgedKey),isFalse);
     await confirm(t);

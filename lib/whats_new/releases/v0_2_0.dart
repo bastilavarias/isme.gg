@@ -19,10 +19,14 @@ class PlaybackUpdateDialog extends StatefulWidget {
 }
 
 class _PlaybackUpdateDialogState extends State<PlaybackUpdateDialog> {
-  late bool direct=AppPreferences.nativeDirect(widget.prefs);
-  late bool fast=direct&&AppPreferences.fastStartup(widget.prefs);
+  late bool direct, fast;
   bool busy=false;
   String? error;
+  @override void initState(){
+    super.initState();
+    direct=AppPreferences.nativeDirect(widget.prefs);
+    fast=direct&&AppPreferences.fastStartup(widget.prefs);
+  }
   Future<void> confirm() async {
     if(busy)return;
     setState((){busy=true;error=null;});
