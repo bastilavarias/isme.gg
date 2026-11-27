@@ -68,6 +68,7 @@ void main(){
     final movies=find.byKey(const ValueKey('mobile-discover-Movies'));
     final series=find.byKey(const ValueKey('mobile-discover-TV Series'));
     expect(tester.getSize(movies).width,closeTo(358,1));
+    expect(tester.getSize(movies).height,116);
     expect(tester.getTopLeft(movies).dx,tester.getTopLeft(series).dx);
     expect(tester.getTopLeft(series).dy,greaterThan(tester.getBottomLeft(movies).dy));
     await tester.enterText(field,'Example');await tester.pumpAndSettle();
@@ -95,15 +96,16 @@ void main(){
     expect(tester.takeException(),isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
-  test('category artwork uses two unique poster URLs only',(){
+  test('category artwork prefers landscape backdrops and never portrait posters',(){
     const rows=[
       Movie(id:'1',title:'One',poster:'https://example.com/one.jpg'),
-      Movie(id:'2',title:'Duplicate',poster:'https://example.com/one.jpg'),
-      Movie(id:'3',title:'No poster',backdrop:'https://example.com/backdrop.jpg'),
-      Movie(id:'4',title:'Two',poster:'https://example.com/two.jpg'),
-      Movie(id:'5',title:'Three',poster:'https://example.com/three.jpg'),
+      Movie(id:'2',title:'Portrait only',poster:'https://example.com/two.jpg',backdrop:'https://example.com/two.jpg'),
+      Movie(id:'3',title:'Landscape',backdrop:'https://example.com/backdrop.jpg'),
+      Movie(id:'4',title:'Another',backdrop:'https://example.com/another.jpg'),
     ];
-    expect(discoveryPosters(rows),['https://example.com/one.jpg','https://example.com/two.jpg']);
+    expect(discoveryBackdrop(rows), 'https://example.com/backdrop.jpg');
+    expect(discoveryBackdrop(rows.take(2)),isNull);
+    expect(discoveryBackdrop(const []),isNull);
   });
   testWidgets('clearing recent searches removes the entire section',(tester)async{
     SharedPreferences.setMockInitialValues({'isme-mobile-searches':['Example','  ']});

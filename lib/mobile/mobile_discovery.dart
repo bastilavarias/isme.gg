@@ -38,51 +38,55 @@ const mobileGenres=[
 const discoveryArtworkKeys={'Movies':'weekly_movies','TV Series':'weekly_tv',
   'Anime':'anime','Pinoy':'pinoy_home','Korean':'korean_home'};
 
-List<String> discoveryPosters(Iterable<Movie> movies){
-  final seen=<String>{};
-  return movies.map((m)=>m.poster).where((url)=>url.startsWith('https://')&&seen.add(url)).take(2).toList();
+/// Prefer actual landscape artwork, never stretch a portrait poster.
+String? discoveryBackdrop(Iterable<Movie> movies){
+  for(final movie in movies){
+    if(movie.backdrop.startsWith('https://')&&movie.backdrop!=movie.poster)return movie.backdrop;
+  }
+  return null;
 }
 
-/// Full-width category cards, with artwork angled toward the right edge.
+/// Full-width cinematic category banners using matching catalog backdrops.
 class DiscoveryCategoryList extends StatelessWidget {
   final List<DiscoveryTile> tiles;
-  final Map<String,List<String>> posters;
+  final Map<String,String> backdrops;
   final ValueChanged<DiscoveryTile> onSelected;
-  const DiscoveryCategoryList({super.key,required this.tiles,required this.posters,required this.onSelected});
+  const DiscoveryCategoryList({super.key,required this.tiles,required this.backdrops,required this.onSelected});
   @override Widget build(BuildContext context)=>Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
     for(var i=0;i<tiles.length;i++)...[
-      if(i>0)const SizedBox(height:10),
-      _CategoryCard(tile:tiles[i],posters:posters[tiles[i].name]??const [],onTap:()=>onSelected(tiles[i])),
+      if(i>0)const SizedBox(height:12),
+      _CategoryCard(tile:tiles[i],backdrop:backdrops[tiles[i].name],onTap:()=>onSelected(tiles[i])),
     ],
   ]);
 }
 class _CategoryCard extends StatelessWidget {
   final DiscoveryTile tile;
-  final List<String> posters;
+  final String? backdrop;
   final VoidCallback onTap;
-  const _CategoryCard({required this.tile,required this.posters,required this.onTap});
-  Widget artwork(String url,double width)=>Transform.rotate(angle:.279253,
-    child:DecoratedBox(decoration:BoxDecoration(borderRadius:BorderRadius.circular(5),
-      boxShadow:const [BoxShadow(color:Colors.black38,blurRadius:9,offset:Offset(0,4))]),
-      child:ClipRRect(borderRadius:BorderRadius.circular(5),
-        child:SizedBox(width:width,height:width*1.5,child:CinemaArt(url,cacheWidth:240)))));
-  @override Widget build(BuildContext context)=>SizedBox(height:92,child:Material(
+  const _CategoryCard({required this.tile,required this.backdrop,required this.onTap});
+  @override Widget build(BuildContext context)=>SizedBox(height:116,child:Material(
     color:tile.color,borderRadius:BorderRadius.circular(12),clipBehavior:Clip.antiAlias,
-    child:InkWell(key:ValueKey('mobile-discover-${tile.name}'),onTap:onTap,
-      child:LayoutBuilder(builder:(context,box){
-        final width=(box.maxWidth*.22).clamp(44.0,78.0).toDouble();
-        return Stack(fit:StackFit.expand,clipBehavior:Clip.hardEdge,children:[
-          if(posters.isEmpty)Positioned(right:18,top:0,bottom:0,child:Icon(tile.icon,size:58,color:Colors.white24)),
-          if(posters.length>1)Positioned(right:width+9,top:7,child:Opacity(opacity:.76,child:artwork(posters[1],width))),
-          if(posters.isNotEmpty)Positioned(right:10,top:-10,child:artwork(posters[0],width)),
-          IgnorePointer(child:DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(
-            colors:[tile.color,tile.color,tile.color.withValues(alpha:0)],stops:const [0,.26,.76])))),
-          Align(alignment:Alignment.centerLeft,child:Padding(padding:const EdgeInsets.symmetric(horizontal:17),
-            child:ConstrainedBox(constraints:BoxConstraints(maxWidth:box.maxWidth*.52),
-              child:Text(tile.name,maxLines:2,overflow:TextOverflow.ellipsis,
-                style:const TextStyle(color:Colors.white,fontSize:18,fontWeight:FontWeight.w700))))),
-        ]);
-      }))));
+    child:Stack(fit:StackFit.expand,children:[
+      if(backdrop!=null)ExcludeSemantics(child:Image.network(backdrop!,fit:BoxFit.cover,
+        alignment:Alignment.centerRight,cacheWidth:960,
+        errorBuilder:(_,__,___)=>const SizedBox.shrink()))
+      else Positioned(right:32,top:0,bottom:0,child:Icon(tile.icon,size:64,color:Colors.white24)),
+      const DecoratedBox(decoration:BoxDecoration(gradient:LinearGradient(
+        colors:[Color(0xF2161311),Color(0xB8161311),Color(0x35161311)],
+        stops:[0,.48,1]))),
+      Material(color:Colors.transparent,child:InkWell(
+        key:ValueKey('mobile-discover-${tile.name}'),onTap:onTap,
+        child:Padding(padding:const EdgeInsets.symmetric(horizontal:18),child:Row(children:[
+          Expanded(child:Column(mainAxisAlignment:MainAxisAlignment.center,crossAxisAlignment:CrossAxisAlignment.start,children:[
+            Text(tile.name,maxLines:2,overflow:TextOverflow.ellipsis,
+              style:const TextStyle(color:Colors.white,fontSize:20,fontWeight:FontWeight.w700)),
+            const SizedBox(height:4),
+            const Text('Explore collection',style:TextStyle(color:Colors.white70,fontSize:12)),
+          ])),
+          const SizedBox(width:12),
+          const Icon(Icons.chevron_right,color:Colors.white,size:24),
+        ])))),
+    ])));
 }
 
 class DiscoveryGrid extends StatelessWidget {

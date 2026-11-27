@@ -38,7 +38,7 @@ class _MobileHomeState extends State<MobileHome>{
   String category='Home',searchCategory='All';
   List<Movie> results=[];
   List<String> recent=[];
-  final discoveryArtwork=<String,List<String>>{};
+  final discoveryArtwork=<String,String>{};
   bool loadingDiscoveryArtwork=false;
   int tab=0,revision=0,searchRevision=0,directoryRevision=0;
   bool busy=true,searching=false,platformBusy=false,searchFailed=false,opening=false;
@@ -315,12 +315,14 @@ class _MobileHomeState extends State<MobileHome>{
     setState(()=>recent=[]);
     unawaited(widget.history.prefs.remove('isme-mobile-searches'));
   }
-  Map<String,List<String>> get categoryArtwork=> {
-    for(final entry in discoveryArtworkKeys.entries)
-      entry.key:discoveryPosters(shelves[entry.value]??const []).length>=2
-        ?discoveryPosters(shelves[entry.value]!)
-        :discoveryArtwork[entry.key]??discoveryPosters(shelves[entry.value]??const []),
-  };
+  Map<String,String> get categoryArtwork{
+    final result=<String,String>{...discoveryArtwork};
+    for(final entry in discoveryArtworkKeys.entries){
+      final image=discoveryBackdrop(shelves[entry.value]??const []);
+      if(image!=null)result.putIfAbsent(entry.key,()=>image);
+    }
+    return result;
+  }
   Future<void> loadDiscoveryArtwork() async{
     if(loadingDiscoveryArtwork)return;
     loadingDiscoveryArtwork=true;
@@ -329,19 +331,20 @@ class _MobileHomeState extends State<MobileHome>{
       for(var i=0;i<entries.length;i+=2){
         if(!mounted)return;
         await Future.wait(entries.skip(i).take(2).map((entry)async{
-          final existing=categoryArtwork[entry.key]??const <String>[];
-          if(existing.length>=2)return;
+          if(categoryArtwork.containsKey(entry.key))return;
           try{
             final cached=await engine.catalogSnapshot(entry.value,mode:'cached');
             if(!mounted)return;
-            var images=discoveryPosters(cached.movies);
-            if(images.length>existing.length)setState(()=>discoveryArtwork[entry.key]=images);
-            if(images.length<2&&existing.length<2){
-              final live=await engine.catalogSnapshot(entry.value);
-              if(!mounted)return;
-              images=discoveryPosters(live.movies);
-              if(images.length>(categoryArtwork[entry.key]?.length??0))setState(()=>discoveryArtwork[entry.key]=images);
+            final image=discoveryBackdrop(cached.movies);
+            if(image!=null){
+              setState(()=>discoveryArtwork[entry.key]=image);
+              return;
             }
+            if(categoryArtwork.containsKey(entry.key))return;
+            final live=await engine.catalogSnapshot(entry.value);
+            if(!mounted)return;
+            final backdrop=discoveryBackdrop(live.movies);
+            if(backdrop!=null)setState(()=>discoveryArtwork[entry.key]=backdrop);
           }catch(_){/* Keep the category usable when artwork is unavailable. */}
         }));
       }
@@ -365,7 +368,7 @@ class _MobileHomeState extends State<MobileHome>{
         const SizedBox(height:28),
       ],
       discoveryHeading('Browse categories'),
-      Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:DiscoveryCategoryList(tiles:mobileCategories,posters:categoryArtwork,onSelected:browse)),
+      Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:DiscoveryCategoryList(tiles:mobileCategories,backdrops:categoryArtwork,onSelected:browse)),
       const SizedBox(height:28),
       discoveryHeading('Browse genres'),
       Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:DiscoveryGrid(tiles:mobileGenres,onSelected:browse)),
