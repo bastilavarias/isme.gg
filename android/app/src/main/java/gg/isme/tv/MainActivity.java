@@ -79,6 +79,9 @@ public final class MainActivity extends FlutterActivity {
                         Map<String,Object> info = new HashMap<>();
                         info.put("origin", cinema.url()); info.put("token", cinema.token()); info.put("tv", tv);
                         info.put("versionName", BuildConfig.VERSION_NAME);
+                        info.put("versionCode", BuildConfig.VERSION_CODE);
+                        android.content.pm.PackageInfo installed = getPackageManager().getPackageInfo(getPackageName(), 0);
+                        info.put("isUpgrade", installed.lastUpdateTime > installed.firstInstallTime);
                         result.success(info);
                     } catch (Exception e) { result.error("ENGINE", "Could not start local playback engine", null); }
                 } else if ("readMetadataCredential".equals(call.method)) {
@@ -90,22 +93,16 @@ public final class MainActivity extends FlutterActivity {
                         result.success(null);
                     }catch(Exception e){result.error("CREDENTIAL","Could not save metadata credential",null);}
                 } else if ("updateDirectBuffer".equals(call.method)) {
-                    if (BuildConfig.DEBUG) {
-                        String uri = call.argument("uri");
-                        if (uri != null) DirectMediaProvider.updateBuffer(Uri.parse(uri), Boolean.TRUE.equals(call.argument("urgent")));
-                    }
+                    String uri = call.argument("uri");
+                    if (uri != null) DirectMediaProvider.updateBuffer(Uri.parse(uri), Boolean.TRUE.equals(call.argument("urgent")));
                     result.success(null);
                 } else if ("finishDirectStartup".equals(call.method)) {
-                    if (BuildConfig.DEBUG) {
-                        String uri = call.argument("uri");
-                        if (uri != null) DirectMediaProvider.finishStartup(Uri.parse(uri));
-                    }
+                    String uri = call.argument("uri");
+                    if (uri != null) DirectMediaProvider.finishStartup(Uri.parse(uri));
                     result.success(null);
                 } else if ("cancelDirectReads".equals(call.method)) {
-                    if (BuildConfig.DEBUG) {
-                        String uri = call.argument("uri");
-                        if (uri != null) DirectMediaProvider.cancel(Uri.parse(uri));
-                    }
+                    String uri = call.argument("uri");
+                    if (uri != null) DirectMediaProvider.cancel(Uri.parse(uri));
                     result.success(null);
                 } else if ("audioDiagnostics".equals(call.method)) {
                     android.media.AudioManager audio = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);

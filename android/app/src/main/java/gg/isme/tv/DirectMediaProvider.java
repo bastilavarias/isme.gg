@@ -33,7 +33,6 @@ public final class DirectMediaProvider extends ContentProvider {
     private static String instance;
 
     static void bind(TorrentEngine source) {
-        if (!BuildConfig.DEBUG) return;
         synchronized (LOCK) {
             engine = source;
             instance = UUID.randomUUID().toString();
@@ -48,7 +47,7 @@ public final class DirectMediaProvider extends ContentProvider {
 
     static Uri uri(Context context, TorrentEngine source, long generation) {
         synchronized (LOCK) {
-            if (!BuildConfig.DEBUG || engine != source || instance == null) return null;
+            if (engine != source || instance == null) return null;
             return new Uri.Builder().scheme("content")
                 .authority(context.getPackageName() + ".directmedia")
                 .appendPath(instance).appendPath(Long.toString(generation)).build();
@@ -56,7 +55,7 @@ public final class DirectMediaProvider extends ContentProvider {
     }
 
     static void updateBuffer(Uri uri, boolean urgent) {
-        if (!BuildConfig.DEBUG || uri == null) return;
+        if (uri == null) return;
         List<String> parts = uri.getPathSegments();
         synchronized (LOCK) {
             if (engine == null || parts.size() != 2 || !parts.get(0).equals(instance)) return;
@@ -66,7 +65,7 @@ public final class DirectMediaProvider extends ContentProvider {
     }
 
     static void finishStartup(Uri uri) {
-        if (!BuildConfig.DEBUG || uri == null) return;
+        if (uri == null) return;
         List<String> parts = uri.getPathSegments();
         synchronized (LOCK) {
             if (engine == null || parts.size() != 2 || !parts.get(0).equals(instance)) return;
@@ -76,7 +75,7 @@ public final class DirectMediaProvider extends ContentProvider {
     }
 
     static void cancel(Uri uri) {
-        if (!BuildConfig.DEBUG || uri == null) return;
+        if (uri == null) return;
         List<String> parts = uri.getPathSegments();
         synchronized (LOCK) {
             if (engine == null || parts.size() != 2 || !parts.get(0).equals(instance)) return;
@@ -87,7 +86,7 @@ public final class DirectMediaProvider extends ContentProvider {
 
     private TorrentEngine.DirectReader reader(Uri uri, String mode) throws FileNotFoundException {
         List<String> parts = uri.getPathSegments();
-        if (!BuildConfig.DEBUG || !"r".equals(mode) || parts.size() != 2 ||
+        if (!"r".equals(mode) || parts.size() != 2 ||
                 android.os.Binder.getCallingUid() != android.os.Process.myUid())
             throw new FileNotFoundException("Direct media unavailable");
         synchronized (LOCK) {

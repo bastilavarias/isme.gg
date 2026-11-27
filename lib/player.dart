@@ -197,7 +197,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   final Stopwatch startupClock=Stopwatch();
   int? nativeReadyMs, probeMs, initializedMs, playRequestedMs, firstAdvanceMs;
   bool checkingEngineHealth=false;
-  bool get nativeDirect=>kDebugMode&&AppPreferences.nativeDirect(widget.history.prefs);
+  bool get nativeDirect=>AppPreferences.nativeDirect(widget.history.prefs);
   String transport='http';
   bool fastStartup=false, adaptiveBuffering=false, bufferUrgent=false;
   int startupBufferTargetMs=0,startupBufferHoldMs=0,rebufferCount=0;
@@ -212,15 +212,16 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     try{await widget.engine.updateDirectBuffer(c.dataSource,urgent).timeout(const Duration(seconds:1));}catch(_){}
   }
   void sampleAdaptiveBuffer(VideoPlayerController c){
-    if(!kDebugMode)return;
+    if(!kDebugMode&&!adaptiveBuffering)return;
     final v=c.value,ahead=bufferAheadMs(c.value);
     if(adaptiveBuffering){
       final next=AdaptiveBufferPolicy.urgent(previous:bufferUrgent,
         wantsPlayback:wantsPlayback&&_foreground&&!v.isCompleted,buffering:v.isBuffering,aheadMs:ahead);
       if(next||bufferUrgent!=next)unawaited(sendBufferUrgency(c,next));
-      if(next!=bufferUrgent)debugPrint('IsmePlayback: buffer-urgency=$next aheadMs=$ahead buffering=${v.isBuffering}');
+      if(kDebugMode&&next!=bufferUrgent)debugPrint('IsmePlayback: buffer-urgency=$next aheadMs=$ahead buffering=${v.isBuffering}');
       bufferUrgent=next;
     }
+    if(!kDebugMode)return;
     final stalled=firstAdvanceMs!=null&&wantsPlayback&&_foreground&&!v.isCompleted&&v.isBuffering;
     if(stalled&&rebufferSince==null){
       rebufferSince=DateTime.now();rebufferCount++;
@@ -254,7 +255,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       await cancellable(Future<void>.delayed(const Duration(milliseconds:200)),cancel);
     }
     startupBufferHoldMs=hold.elapsedMilliseconds;
-    debugPrint('IsmePlayback: adaptive-startup targetMs=$startupBufferTargetMs heldMs=$startupBufferHoldMs aheadMs=${bufferAheadMs(c.value)} readWaitMs=$wait resuming=$resuming');
+    if(kDebugMode)debugPrint('IsmePlayback: adaptive-startup targetMs=$startupBufferTargetMs heldMs=$startupBufferHoldMs aheadMs=${bufferAheadMs(c.value)} readWaitMs=$wait resuming=$resuming');
   }
   Future<void> disposePlayback(VideoPlayerController c) async {
     if(c.dataSource.startsWith('content://')){

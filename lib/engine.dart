@@ -82,6 +82,8 @@ class NativeEngine {
   late final String token;
   bool tv = false;
   String appVersion='';
+  int appVersionCode=0;
+  bool isUpgrade=false;
   String providerCountry='PH';
   String _providerToken='';
   final providerRevision=ValueNotifier<int>(0);
@@ -144,6 +146,8 @@ class NativeEngine {
     if (origin.host != '127.0.0.1' || origin.scheme != 'http') throw StateError('Invalid local origin');
     token = result['token'] as String; tv = result['tv'] == true;
     appVersion=result['versionName']?.toString()??'';
+    appVersionCode=(result['versionCode'] as num?)?.toInt()??0;
+    isUpgrade=result['isUpgrade']==true;
   }
   Uri url(String path, [Map<String,String>? query]) => origin.resolve(path).replace(queryParameters: query);
   Future<Map<String,dynamic>> json(String path, {Map<String,String>? query, Map<String,dynamic>? body}) async {

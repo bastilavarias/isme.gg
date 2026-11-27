@@ -19,6 +19,7 @@ import 'next_episode.dart';
 import 'bookmark_button.dart';
 import 'my_list.dart';
 import 'app_preferences.dart';
+import 'whats_new/whats_new_controller.dart';
 
 void main(){ WidgetsFlutterBinding.ensureInitialized(); PaintingBinding.instance.imageCache.maximumSizeBytes=48*1024*1024; PaintingBinding.instance.imageCache.maximumSize=120; runApp(const IsmeApp()); }
 class IsmeApp extends StatefulWidget {
@@ -38,15 +39,17 @@ class _IsmeAppState extends State<IsmeApp> {
   }
   Future<void> boot() async {
     final e=NativeEngine();
-    try {await e.connect(); await e.restoreMetadataCredential(); final h=await History.open(await SharedPreferences.getInstance());final country=AppPreferences.region(h.prefs);if(RegExp(r'^[A-Z]{2}$').hasMatch(country))e.providerCountry=country;if(!mounted){e.dispose();return;}setState((){engine=e;history=h;error=null;});}
-    catch(err){e.dispose();if(mounted)setState(()=>error=err.toString());}
+    // Hold automatic update prompts throughout boot and the release modal.
+    await e.setSupportUiActive(true);
+    try {await e.connect(); await e.restoreMetadataCredential(); final h=await History.open(await SharedPreferences.getInstance());final country=AppPreferences.region(h.prefs);if(RegExp(r'^[A-Z]{2}$').hasMatch(country))e.providerCountry=country;if(!mounted){await e.setSupportUiActive(false);e.dispose();return;}setState((){engine=e;history=h;error=null;});}
+    catch(err){await e.setSupportUiActive(false);e.dispose();if(mounted)setState(()=>error=err.toString());}
   }
   @override void dispose(){HardwareKeyboard.instance.removeHandler(_navigationSound);engine?.dispose();super.dispose();}
   @override Widget build(BuildContext context)=>MaterialApp(debugShowCheckedModeBanner:false,theme:cinemaTheme(),title:'isme.gg',
     home:engine==null?Scaffold(body:Center(child:Column(mainAxisSize:MainAxisSize.min,children:[
       const Wordmark(size:48),const SizedBox(height:24),
       if(error==null)const CircularProgressIndicator() else ...[Text(error!),TextButton(onPressed:(){setState(()=>error=null);boot();},child:const Text('Retry'))]
-    ]))):deviceHome(engine!,history!));
+    ]))):WhatsNewGate(engine:engine!,prefs:history!.prefs,child:deviceHome(engine!,history!)));
 }
 /// Device classification comes from Android's UI mode, not screen orientation.
 Widget deviceHome(NativeEngine engine,History history)=>engine.tv?CinemaHome(engine:engine,history:history):MobileHome(engine:engine,history:history);

@@ -6,6 +6,7 @@ import 'back_navigation.dart';
 import 'design.dart';
 import 'engine.dart';
 import 'support_menu.dart';
+import 'whats_new/whats_new_controller.dart';
 
 /// Shared settings route. Returns true only when the user requests updates,
 /// so the caller can release the support UI guard before checking.
@@ -90,15 +91,15 @@ class _SettingsPageState extends State<SettingsPage>{
           section('Playback'),
           toggle(Icons.play_circle_outline,'Autoplay next episode','Continue to the next episode automatically',AppPreferences.autoplay(p),(v)=>saveBool(AppPreferences.autoplayKey,v)),
           toggle(Icons.monitor_outlined,'Keep screen awake','Prevent sleep during playback',AppPreferences.awake(p),(v)=>saveBool(AppPreferences.awakeKey,v)),
-          if(kDebugMode)...[
+          ...[
             section('Experimental playback'),
             row(Icons.science_outlined,'Playback transport',()async{
               final value=await choose('Playback transport',{false:'Legacy HTTP',true:'Native Direct'},AppPreferences.nativeDirect(p));
               if(value!=null&&mounted)await saveBool(AppPreferences.nativeDirectKey,value);
-            },subtitle:'Debug benchmark only; applies to the next playback',
+            },subtitle:'Optional experimental engine; applies to the next playback',
               trailing:Text(AppPreferences.nativeDirect(p)?'Native Direct':'Legacy HTTP')),
             if(AppPreferences.nativeDirect(p))...[
-              toggle(Icons.speed,'Fast startup','Prioritize initial media data; disable for baseline tests',AppPreferences.fastStartup(p),(v)=>saveBool(AppPreferences.fastStartupKey,v)),
+              toggle(Icons.speed,'Fast startup','Prioritize initial media data; optional experimental acceleration',AppPreferences.fastStartup(p),(v)=>saveBool(AppPreferences.fastStartupKey,v)),
               toggle(Icons.network_check,'Adaptive buffering','Adjust the startup buffer and prioritize reads when it runs low',AppPreferences.adaptiveBuffering(p),(v)=>saveBool(AppPreferences.adaptiveBufferingKey,v)),
             ],
           ],
@@ -117,6 +118,11 @@ class _SettingsPageState extends State<SettingsPage>{
           row(Icons.history,'Clear watch history',clearHistory,subtitle:'Remove Continue Watching and resume progress'),
           row(Icons.delete_outline,'Reset app data',()=>confirmClearLocalData(context,engine),danger:true,subtitle:'Remove all local data, including My List'),
           section('Support & about'),
+          if(kDebugMode&&WhatsNewController.builder(engine.appVersion,engine.appVersionCode)!=null)
+            row(Icons.new_releases_outlined,"Preview What's New",()async{
+              await WhatsNewController.show(context,p,version:engine.appVersion,code:engine.appVersionCode,upgraded:true,preview:true);
+              if(mounted)setState((){});
+            },subtitle:'Development only; applies selections without marking the release seen'),
           row(Icons.refresh,'Check for updates',(){appBackGate.block();Navigator.of(context).pop(true);},trailing:Text(installedVersion(engine))),
           row(Icons.report_problem_outlined,'Report a problem',()=>showReportProblem(context,engine)),
           row(Icons.info_outline,'About isme.gg',()=>showAboutDialog(context:context,applicationName:'isme.gg',applicationVersion:installedVersion(engine))),

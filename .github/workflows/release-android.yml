@@ -55,6 +55,8 @@ jobs:
           assert re.fullmatch(r"[1-9][0-9]*", code) and int(code) <= 2100000000, "Invalid versionCode"
           assert f"version: {version}+{code}" in Path("pubspec.yaml").read_text().splitlines(), "Workflow version must match pubspec.yaml"
           '
+      - name: Require version-specific What's New content
+        run: python3 tools/check_whats_new.py
       - name: Prepare build
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-${{ steps.toolchain.outputs.androidSdk }}" "build-tools;${{ steps.toolchain.outputs.androidBuildTools }}"

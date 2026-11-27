@@ -181,7 +181,7 @@ final class LocalCinemaServer {
             }
             if (path.equals("/api/status") && method.equals("GET")) {
                 JSONObject state = torrents.state();
-                if (BuildConfig.DEBUG && "ready".equals(state.optString("status"))) {
+                if ("ready".equals(state.optString("status"))) {
                     String stream = state.optString("streamUrl");
                     if (stream.startsWith("/stream/video?session=")) {
                         long generation = Long.parseLong(stream.substring("/stream/video?session=".length()));
@@ -224,8 +224,8 @@ final class LocalCinemaServer {
                 }
                 subtitles.reset();
                 torrents.start(id, body.optString("title", id), body.optInt("sourceIndex", 0), magnet,episodeKey,
-                    BuildConfig.DEBUG && body.optBoolean("fastStartup", false),
-                    BuildConfig.DEBUG && body.optBoolean("adaptiveBuffering", false));
+                    body.optBoolean("fastStartup", false),
+                    body.optBoolean("adaptiveBuffering", false));
                 sendJson(out, 202, new JSONObject().put("status", "loading")); return;
             }
             if (path.equals("/api/stop") && method.equals("POST")) {

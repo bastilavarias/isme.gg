@@ -1,7 +1,1 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
-        <provider android:name=".DirectMediaProvider"
-            android:authorities="${applicationId}.directmedia"
-            android:exported="false" android:grantUriPermissions="false"/>
-    </application>
-</manifest>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"/>
