@@ -33,6 +33,34 @@ PlaybackFault classifyPlaybackError(Object error) {
   return PlaybackFault.unknown;
 }
 
+/// Keep known diagnostic reasons, not arbitrary exception strings (which may
+/// include credentials, paths, media titles, hashes or provider endpoints).
+String safePlaybackDetail(Object error) {
+  final text=error.toString().toLowerCase();
+  const reasons=[
+    'video exceeds 3 gib device cache limit',
+    'not enough free device storage for playback',
+    'no space left', 'unsafe torrent file path',
+    'episode file index unavailable', 'episode file could not be identified unambiguously',
+    'no playable video file found', 'no matching torrent sources found',
+    'source index unavailable', 'this title has no supported media id',
+    'could not create private cache', 'invalid magnet uri',
+    'media readiness deadline exceeded', 'media data deadline exceeded',
+    'torrent data is missing on disk', 'invalid media endpoint',
+    'invalid playback origin', 'media range response invalid',
+    'media range response truncated', 'media range response too long',
+    'playback stalled', 'permission denied', 'cleartext',
+    'unsupported decoder', 'unrecognizedinputformat', 'source error',
+    'decoder', 'timeout', 'timed out', 'connection', 'socket',
+  ];
+  for(final reason in reasons){
+    if(text.contains(reason))return reason;
+  }
+  final http=RegExp(r'\bhttp\s+([1-5]\d\d)\b').firstMatch(text);
+  if(http!=null)return 'HTTP ${http.group(1)}';
+  return 'Unrecognized error (details withheld)';
+}
+
 class RecoveryBudget {
   static const maxAttempts = 3;
   final Map<int, int> _attempts = {};

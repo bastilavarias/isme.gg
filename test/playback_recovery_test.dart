@@ -32,6 +32,15 @@ void main() {
         candidates: [0, 1], manualSource: true), 0);
   });
 
+  test('diagnostic reasons retain known failures without leaking raw data', () {
+    expect(safePlaybackDetail('Bad state: Video exceeds 3 GiB device cache limit'),
+      'video exceeds 3 gib device cache limit');
+    expect(safePlaybackDetail('Not enough free device storage for playback'),
+      'not enough free device storage for playback');
+    expect(safePlaybackDetail('HTTP 403 https://example.com/private?token=secret'),'HTTP 403');
+    expect(safePlaybackDetail('unknown https://example.com/private?token=secret'),
+      'Unrecognized error (details withheld)');
+  });
   test('classifies known errors without guessing unknown causes', () {
     expect(classifyPlaybackError('HTTP 403'), PlaybackFault.internal);
     expect(classifyPlaybackError('Not enough free device storage for playback'), PlaybackFault.internal);

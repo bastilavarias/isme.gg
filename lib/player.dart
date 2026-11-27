@@ -189,6 +189,8 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   String? error;
   String phase='Starting', lastFault='none';
   bool diagnostics=false;
+  String? lastFailureDetail;
+  final retryFocus=FocusNode(debugLabel:'Retry playback'),otherSourceFocus=FocusNode(debugLabel:'Other source');
   Map<String,dynamic> audio={}, nativeState={};
   final RecoveryBudget recovery=RecoveryBudget();
   final Stopwatch startupClock=Stopwatch();
@@ -246,6 +248,18 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(!left&&!right&&!up&&!down)return false;
     final top=topNodes,bottom=bottomNodes;
     final t=top.indexWhere((n)=>n.hasFocus),b=bottom.indexWhere((n)=>n.hasFocus);
+    // No decoder or seek bar exists on the loading/error screen.
+    if(player==null||error!=null||busy){
+      if(t>=0){
+        if(left||right)focusControl(top[(t+(right?1:-1)).clamp(0,top.length-1).toInt()]);
+        else if(down&&error!=null)focusControl(retryFocus);
+      }else if(error!=null){
+        if(up)focusControl(otherSourceFocus.hasFocus?retryFocus:backFocus);
+        else if(down&&sources.length>1)focusControl(otherSourceFocus);
+        else if(!retryFocus.hasFocus&&!otherSourceFocus.hasFocus)focusControl(retryFocus);
+      }else{focusControl(backFocus);}
+      return true;
+    }
     if(_showNext&&(_nextFocus.hasFocus||_creditsFocus.hasFocus)){
       if(left||right)focusControl(right?_creditsFocus:_nextFocus);
       else if(up)focusControl(backFocus);
@@ -292,7 +306,17 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     candidates:sources.map((row)=>row['index']).whereType<int>(),manualSource:widget.magnet.isNotEmpty);
   void logFault(Object e){
     lastFault=classifyPlaybackError(e).name;
-    if(kDebugMode)debugPrint('IsmePlayback: phase=$phase category=$lastFault attempt=${recovery.total}');
+    final storage=nativeState['storage'];
+    final timings=nativeState['timing'];
+    String number(Object? value)=>value is num&&value>=0?value.toString():'unknown';
+    String identifier(Object? value)=>value is String&&RegExp(r'^[a-zA-Z][a-zA-Z0-9_-]{0,47}$').hasMatch(value)?value:'unknown';
+    final detail=safePlaybackDetail(e);
+    final nativeStage=identifier(nativeState['failureStage']);
+    final stage=nativeStage=='unknown'?identifier(nativeState['status']):nativeStage;
+    final nativeType=identifier(nativeState['failureType']);
+    final type=nativeType=='unknown'?identifier(e.runtimeType.toString()):nativeType;
+    lastFailureDetail='$detail; stage=$stage; type=$type; selectedBytes=${number(storage is Map?storage['selectedBytes']:null)}; freeBytes=${number(storage is Map?storage['usableBytes']:null)}; reserveBytes=${number(storage is Map?storage['reserveBytes']:null)}; metadataMs=${number(timings is Map?timings['metadataMs']:null)}';
+    if(kDebugMode)debugPrint('IsmePlayback: phase=$phase category=$lastFault attempt=${recovery.total} elapsedMs=${startupClock.elapsedMilliseconds} $lastFailureDetail');
   }
   Future<void> start({int index=0,bool resetBudget=true}) async {
     if(closed||!mounted)return;
@@ -300,7 +324,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     syncPlaybackScreen(false);
     final n=++generation;
     cancelAttempt();subtitleRevision++;audioRevision++;recommendedAudioId=null;audioTracks=[];watchdog?.cancel();saveTimer?.cancel();hide?.cancel();
-    if(resetBudget){recovery.reset();lastFault='none';wantsPlayback=_foreground;}
+    if(resetBudget){recovery.reset();lastFault='none';lastFailureDetail=null;wantsPlayback=_foreground;}
     nativeState={};_resetNext();
     setState((){busy=true;error=null;progress=0;source=index;controls=true;phase='Opening media';});
     if(old!=null){
@@ -757,7 +781,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       if(mounted)popCurrentPage(context);
     }
   }
-  @override void dispose(){unawaited(widget.engine.setPlaybackActive(false));HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());unawaited(_restoreMobileDisplay());playerFocus.dispose();for(final node in [playFocus,backFocus,debugFocus,seekFocus,rewindFocus,forwardFocus,ccFocus,audioFocus,sourceFocus,_nextFocus,_creditsFocus]){node.dispose();}super.dispose();}
+  @override void dispose(){unawaited(widget.engine.setPlaybackActive(false));HardwareKeyboard.instance.removeHandler(fallbackRemote);WidgetsBinding.instance.removeObserver(this);unawaited(shutdown());unawaited(_restoreMobileDisplay());playerFocus.dispose();for(final node in [retryFocus,otherSourceFocus,playFocus,backFocus,debugFocus,seekFocus,rewindFocus,forwardFocus,ccFocus,audioFocus,sourceFocus,_nextFocus,_creditsFocus]){node.dispose();}super.dispose();}
   String clock(Duration d){final h=d.inHours,m=d.inMinutes.remainder(60).toString().padLeft(2,'0'),s=d.inSeconds.remainder(60).toString().padLeft(2,'0');return h>0?'$h:$m:$s':'$m:$s';}
   Widget diagnosticsPanel(VideoPlayerValue? v){
     final position=v?.position??resume;
@@ -775,6 +799,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
       'Free / reserved': '${mib(storage is Map?storage['usableBytes']:null)} / ${mib(storage is Map?storage['reserveBytes']:null)}',
       'Phase':phase,'Attempts':'${recovery.total}/${RecoveryBudget.maxAttempts}',
       'Last error':lastFault,'Engine':nativeState['status']?.toString()??'—',
+      if(lastFailureDetail!=null)'Failure detail':lastFailureDetail!,
       'Resolution':v==null?'—':'${v.size.width.round()} × ${v.size.height.round()}',
       'Buffer ahead':'${(buffered/1000).toStringAsFixed(1)} s',
       'Output sample rate':audio['sampleRate']?.toString()??'Unavailable',
@@ -936,8 +961,8 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
           child:Center(child:AspectRatio(aspectRatio:c.value.aspectRatio,child:VideoPlayer(c)))),
         if(busy||leaving)loadingView(caption:loadingCaption,percentage:leaving?null:'$progress%'),
         if(error!=null&&!leaving)Center(child:Padding(padding:const EdgeInsets.all(32),child:Column(mainAxisSize:MainAxisSize.min,children:[
-          Text(error!,textAlign:TextAlign.center),const SizedBox(height:16),FilledButton(autofocus:true,onPressed:()=>start(index:source),child:const Text('Retry')),
-          if(sources.length>1)TextButton(onPressed:chooseSource,child:const Text('Other source'))
+          Text(error!,textAlign:TextAlign.center),const SizedBox(height:16),FilledButton(focusNode:retryFocus,autofocus:true,onPressed:()=>start(index:source),child:const Text('Retry')),
+          if(sources.length>1)TextButton(focusNode:otherSourceFocus,onPressed:chooseSource,child:const Text('Other source'))
         ]))),
         if(c!=null&&!leaving)ValueListenableBuilder<VideoPlayerValue>(valueListenable:c,builder:(_,v,__)=>Stack(children:[
           if(v.hasError)loadingView(caption:'Checking playback…'),
@@ -956,8 +981,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
           padding:EdgeInsets.fromLTRB(widget.engine.tv?24:8,8,widget.engine.tv?24:8,22),
           child:Row(children:[
             controlButton(backFocus,'Back',Icons.arrow_back,(){
-              if(widget.engine.tv){Navigator.maybePop(context);}
-              else{unawaited(leave());}
+              unawaited(leave());
             },compact:true),
             Expanded(child:Text(_movie.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:20,fontWeight:FontWeight.w600))),
             if(!widget.engine.tv&&c!=null)_touchButton('Lock controls',Icons.lock_open,_toggleLock),
@@ -966,7 +990,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         if(_touchLocked&&!widget.engine.tv&&!leaving)Positioned(top:8,right:8,child:IconButton.filledTonal(
           tooltip:'Unlock controls',onPressed:_toggleLock,icon:const Icon(Icons.lock))),
         if(_showNext&&c!=null&&(widget.engine.tv||!_touchLocked))nextEpisodeOverlay(),
-        if(kDebugMode&&diagnostics&&!leaving)Positioned(top:64,right:16,child:IgnorePointer(child:Container(width:260,padding:const EdgeInsets.all(12),color:const Color(0xE611110F),child:c==null?diagnosticsPanel(null):ValueListenableBuilder<VideoPlayerValue>(valueListenable:c,builder:(_,v,__)=>diagnosticsPanel(v)))))
+        if(kDebugMode&&diagnostics&&!leaving)Positioned(top:64,right:16,bottom:16,child:IgnorePointer(child:Align(alignment:Alignment.topRight,child:Container(width:300,padding:const EdgeInsets.all(12),color:const Color(0xE611110F),child:SingleChildScrollView(child:c==null?diagnosticsPanel(null):ValueListenableBuilder<VideoPlayerValue>(valueListenable:c,builder:(_,v,__)=>diagnosticsPanel(v)))))))
       ]))))));
   }
 }

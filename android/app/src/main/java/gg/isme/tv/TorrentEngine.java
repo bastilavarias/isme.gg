@@ -57,7 +57,8 @@ final class TorrentEngine {
     private static final long PREPARATION_TTL_MS=30*60*1000L;
     private long sequence = 0L;
     private long startedAt, resolvedAt = -1, metadataAt = -1, readyAt = -1;
-    private long usableBytes = -1, totalBytes = -1;
+    private long usableBytes = -1, totalBytes = -1, inspectedVideoBytes = -1;
+    private String failureStage = "", failureType = "";
     private static final String LOW_STORAGE = "Not enough free device storage for playback";
     private static final long STORAGE_CHECK_MS = 1000L;
 
@@ -95,6 +96,8 @@ final class TorrentEngine {
     }
 
     private void failStorageLocked() {
+        failureStage = status;
+        failureType = "StorageBudget";
         stopLocked();
         sequence++;
         status = "error";
@@ -150,7 +153,8 @@ final class TorrentEngine {
             token = ++sequence;
             startedAt = android.os.SystemClock.elapsedRealtime();
             resolvedAt = metadataAt = readyAt = -1;
-            usableBytes = totalBytes = -1;
+            usableBytes = totalBytes = inspectedVideoBytes = -1;
+            failureStage = failureType = "";
             currentId = id;
             title = name;
             selectedSource = sourceIndex;
@@ -213,6 +217,8 @@ final class TorrentEngine {
             } catch (Throwable failure) {
                 synchronized (lock) {
                     if (token == sequence) {
+                        failureStage = status;
+                        failureType = failure.getClass().getSimpleName();
                         status = "error";
                         error = failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage();
                         message = error;
@@ -234,7 +240,7 @@ final class TorrentEngine {
                         try { prepareVideo(ti); }
                         catch (Exception e) {
                             if (LOW_STORAGE.equals(e.getMessage())) failStorageLocked();
-                            else { status = "error"; error = e.getMessage() == null ? "Media validation failed" : e.getMessage(); message = error; }
+                            else { failureStage = "metadata-validation"; failureType = e.getClass().getSimpleName(); status = "error"; error = e.getMessage() == null ? "Media validation failed" : e.getMessage(); message = error; }
                         }
                     }
                 }
@@ -250,11 +256,12 @@ final class TorrentEngine {
             JSONObject data = new JSONObject().put("id", currentId).put("title", title)
                 .put("status", status).put("message", message)
                 .put("selectedSource", selectedSource)
+                .put("failureStage", failureStage).put("failureType", failureType)
                 .put("timing", new JSONObject().put("resolvedMs", resolvedAt)
                     .put("metadataMs", metadataAt).put("readyMs", readyAt))
                 .put("storage", new JSONObject().put("usableBytes", usableBytes)
                     .put("reserveBytes", totalBytes > 0 ? StorageBudget.reserve(totalBytes) : -1)
-                    .put("selectedBytes", movieLength));
+                    .put("selectedBytes", inspectedVideoBytes));
             JSONArray list = new JSONArray();
             for (MediaCatalog.Source source : choices) list.put(source.publicJson());
             data.put("sources", list);
@@ -299,6 +306,7 @@ final class TorrentEngine {
         if(episodic&&exactIndex<0&&playable!=1)
             throw new IOException("Episode file could not be identified unambiguously");
         if (picked < 0) throw new IOException("No playable video file found");
+        inspectedVideoBytes = longest;
         if (longest > MediaCatalog.MAX_BYTES || longest <= 0)
             throw new IOException("Video exceeds 3 GiB device cache limit");
 
