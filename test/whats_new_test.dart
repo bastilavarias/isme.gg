@@ -83,7 +83,8 @@ void main(){
     // The application gate uses a real monotonic clock, independent of fake
     // frame time in widget tests. Allow the prior test's dismissal to expire.
     await t.runAsync(()=>Future<void>.delayed(appBackGate.cooldown));
-    await t.sendKeyEvent(LogicalKeyboardKey.goBack);await t.pumpAndSettle();
+    await t.sendKeyEvent(LogicalKeyboardKey.goBack,physicalKey:PhysicalKeyboardKey.escape);
+    await t.pumpAndSettle();
     expect(find.byType(AlertDialog),findsNothing);
     expect(find.text('Open release'),findsOneWidget);
     expect(p.getInt(WhatsNewController.acknowledgedKey),18);

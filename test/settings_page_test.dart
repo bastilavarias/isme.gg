@@ -72,6 +72,9 @@ void main(){
     await tester.tap(find.text('Autoplay next episode'));
     await tester.pumpAndSettle();
     expect(AppPreferences.autoplay(prefs),isFalse);
+    await tester.scrollUntilVisible(find.text('Preferred subtitle language'),150,
+      scrollable:find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Preferred subtitle language'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Filipino'));
