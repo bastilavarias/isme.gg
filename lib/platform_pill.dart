@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'engine.dart';
-import 'platform_logos.dart';
+import 'platform_badge_icons.dart';
 import 'platform_rail.dart';
 
 /// Match exact names and aliases shared with the platform rail.
@@ -35,11 +35,10 @@ class ProviderLogoPill extends StatelessWidget {
   final String provider,country;
   final bool tv;
   const ProviderLogoPill({super.key,required this.provider,required this.country,required this.tv});
-  static const _wordmarks={'netflix','disney','prime','crunchyroll','hulu','viu'};
   @override Widget build(BuildContext context){
     final brand=platformBrandForProvider(provider);
-    final bytes=brand==null?null:bundledPlatformLogo(brand.key);
-    final height=tv?18.0:15.0;
+    final bytes=brand==null?null:bundledPlatformBadgeIcon(brand.key);
+    final size=tv?22.0:19.0;
     Widget textFallback()=>Container(
       constraints:const BoxConstraints(maxWidth:99),
       padding:const EdgeInsets.symmetric(horizontal:6,vertical:2),
@@ -50,16 +49,14 @@ class ProviderLogoPill extends StatelessWidget {
     );
     return IgnorePointer(child:Semantics(
       label:'Subscription availability in $country: $provider. Data from JustWatch via TMDB.',
-      child:ExcludeSemantics(child:bytes==null||brand==null?textFallback():Container(
-        height:height+4,
-        constraints:const BoxConstraints(maxWidth:76),
-        padding:const EdgeInsets.symmetric(horizontal:5,vertical:2),
-        decoration:BoxDecoration(color:brand.color,borderRadius:BorderRadius.circular(20),
-          border:Border.all(color:const Color(0x44FFFFFF),width:.5)),
-        child:Image.memory(bytes,height:height,
-          width:_wordmarks.contains(brand.key)?(tv?48:40):height,
-          fit:BoxFit.contain,excludeFromSemantics:true,
-          errorBuilder:(_,__,___)=>FittedBox(fit:BoxFit.scaleDown,child:textFallback())),
+      child:ExcludeSemantics(child:bytes==null||brand==null?textFallback():SizedBox.square(
+        dimension:size,
+        child:ClipRRect(
+          borderRadius:BorderRadius.circular(5),
+          child:Image.memory(bytes,width:size,height:size,fit:BoxFit.contain,
+            excludeFromSemantics:true,
+            errorBuilder:(_,__,___)=>FittedBox(fit:BoxFit.scaleDown,child:textFallback())),
+        ),
       )),
     ));
   }
