@@ -1,6 +1,8 @@
+import re
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import urljoin
 
 from check_website import check_site
 
@@ -62,6 +64,24 @@ class WebsiteValidationTest(unittest.TestCase):
             (root / "assets/compatibility.js").unlink()
             with self.assertRaisesRegex(ValueError, "Missing local file: ../assets/compatibility.js"):
                 check_site(root)
+
+    def test_public_pages_share_navigation_and_layout(self):
+        web = Path(__file__).resolve().parents[1] / "web"
+        base = "https://bastilavarias.github.io/isme.gg/"
+        menus = []
+        for path in ("index.html", "compatibility/index.html"):
+            html = (web / path).read_text(encoding="utf-8")
+            url = urljoin(base, path)
+            css = re.search(r'<link rel="stylesheet" href="([^"]*layout\.css)">', html)
+            self.assertIsNotNone(css)
+            self.assertEqual(urljoin(url, css.group(1)), base + "assets/layout.css")
+            nav = re.search(r'<div class="nav-links">(.*?)</div>', html).group(1)
+            items = [(label, urljoin(url, href).replace("index.html#", "#"))
+                     for href, label in re.findall(r'<a href="([^"]+)"[^>]*>([^<]+)</a>', nav)]
+            menus.append(items)
+        self.assertEqual(menus[0], menus[1])
+        self.assertEqual([label for label, _ in menus[0]],
+                         ["Features", "Explore", "Devices", "Source", "Compatibility", "Download"])
 
 
 if __name__ == "__main__":

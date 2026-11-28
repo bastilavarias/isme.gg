@@ -46,7 +46,7 @@ jobs:
           cp web/compatibility/index.html site/compatibility/
           cp web/data/compatibility.json site/data/
           cp web/assets/brands/tcl.svg site/assets/brands/
-          cp web/assets/{hero.js,releases.js,tmdb.svg,isme-p2p-preview.jpg,isme-orbital.svg,compatibility.js} site/assets/
+          cp web/assets/{hero.js,releases.js,tmdb.svg,isme-p2p-preview.jpg,isme-orbital.svg,compatibility.js,layout.css} site/assets/
           cp web/assets/fonts/{nunito-latin.woff2,OFL.txt} site/assets/fonts/
           cp web/assets/screenshots/{tv-hero.gif,tv-hero.webm,tv-hero.mp4,tv-hero-poster.webp,tv-home.png,tv-showcase.png,mobile-home.png,mobile-details.png,player-showcase.png} site/assets/screenshots/
           cp web/assets/posters/{movies,series,anime,pinoy,kdrama}.webp site/assets/posters/
