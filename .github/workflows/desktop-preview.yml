@@ -1,0 +1,36 @@
+name: Desktop preview checks
+on:
+  workflow_dispatch:
+  push:
+    branches: ['desktop/**']
+    paths:
+      - 'desktop/**'
+      - 'setupdesktop.ps1'
+      - 'toolchain.json'
+      - '.github/workflows/desktop-preview.yml'
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read Flutter pin
+        id: sdk
+        shell: pwsh
+        run: |
+          $pin = Get-Content toolchain.json -Raw | ConvertFrom-Json
+          "flutter=$($pin.flutter)" >> $env:GITHUB_OUTPUT
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.sdk.outputs.flutter }}
+          channel: stable
+      - name: Generate runner, validate, and compile desktop preview
+        shell: pwsh
+        run: ./setupdesktop.ps1 -Build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ismegg-windows-preview
+          path: desktop/build/windows/x64/runner/Release/
+          if-no-files-found: error
+          retention-days: 7
