@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'playback_recovery.dart';
+import 'playback_mascot.dart';
 import 'adaptive_buffering.dart';
 import 'player_preferences.dart';
 import 'app_preferences.dart';
@@ -927,14 +928,21 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         offset:visible?Offset.zero:Offset(0,top?-.12:.12),
         child:AnimatedOpacity(duration:motion,curve:Curves.easeOutCubic,opacity:visible?1:0,child:child))));
   }
-  Widget loadingView({required String caption,String? percentage}){
-    return Center(child:Column(mainAxisSize:MainAxisSize.min,children:[
-      const CircularProgressIndicator(),const SizedBox(height:18),
-      if(percentage!=null)Text(percentage,style:const TextStyle(fontSize:22,fontWeight:FontWeight.w600)),
-      const SizedBox(height:8),
-      AnimatedSwitcher(duration:motion,child:Text(caption,key:ValueKey(caption),
-        textAlign:TextAlign.center,style:const TextStyle(fontSize:14,color:CinemaColors.muted))),
-    ]));
+  IsmePlaybackPose get mascotPose=>playbackPose(phase:phase,nativeStatus:nativeState['status'],
+    leaving:leaving,failed:error!=null,attempts:recovery.total);
+  String? get mascotProgress=>!leaving&&phase=='Preparing media'&&nativeState['status']=='buffering'&&
+    nativeState['progress'] is num?'$progress%':null;
+  Widget loadingView({required String caption,required IsmePlaybackPose pose,String? percentage}){
+    return IgnorePointer(child:Center(child:LayoutBuilder(builder:(context,limits){
+      final size=(limits.maxHeight*.36).clamp(72.0,widget.engine.tv?180.0:144.0).toDouble();
+      return Column(mainAxisSize:MainAxisSize.min,children:[
+        PlaybackMascot(pose:pose,size:size),
+        if(percentage!=null)Text(percentage,style:const TextStyle(fontSize:22,fontWeight:FontWeight.w600)),
+        const SizedBox(height:8),
+        Semantics(liveRegion:true,child:AnimatedSwitcher(duration:motion,child:Text(caption,key:ValueKey(caption),
+          textAlign:TextAlign.center,style:TextStyle(fontSize:widget.engine.tv?16:14,color:CinemaColors.muted)))),
+      ]);
+    })));
   }
   Widget nextEpisodeOverlay(){
     final next=_next!;
@@ -1055,14 +1063,15 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
             unawaited(seek(x<MediaQuery.sizeOf(context).width/2?-10:10));
           },
           child:Center(child:AspectRatio(aspectRatio:c.value.aspectRatio,child:VideoPlayer(c)))),
-        if(busy||leaving)loadingView(caption:loadingCaption,percentage:leaving?null:'$progress%'),
+        if(busy||leaving)loadingView(caption:loadingCaption,pose:mascotPose,percentage:mascotProgress),
         if(error!=null&&!leaving)Center(child:Padding(padding:const EdgeInsets.all(32),child:Column(mainAxisSize:MainAxisSize.min,children:[
+          PlaybackMascot(pose:IsmePlaybackPose.failed,size:(MediaQuery.sizeOf(context).height*.22).clamp(48.0,120.0).toDouble()),
           Text(error!,textAlign:TextAlign.center),const SizedBox(height:16),FilledButton(focusNode:retryFocus,autofocus:true,onPressed:()=>start(index:source),child:const Text('Retry')),
           if(sources.length>1)TextButton(focusNode:otherSourceFocus,onPressed:chooseSource,child:const Text('Other source'))
         ]))),
         if(c!=null&&!leaving)ValueListenableBuilder<VideoPlayerValue>(valueListenable:c,builder:(_,v,__)=>Stack(children:[
-          if(v.hasError)loadingView(caption:'Checking playback…'),
-          if(v.isBuffering&&!v.hasError)loadingView(caption:'Buffering playback…'),
+          if(v.hasError)loadingView(caption:'Checking playback…',pose:IsmePlaybackPose.retrying),
+          if(v.isBuffering&&!v.hasError)loadingView(caption:'Buffering playback…',pose:IsmePlaybackPose.buffering),
           if(v.caption.text.isNotEmpty)AnimatedAlign(duration:motion,curve:Curves.easeOutCubic,
             alignment:controls?const Alignment(0,.34):const Alignment(0,.84),
             child:ConstrainedBox(constraints:BoxConstraints(maxWidth:MediaQuery.sizeOf(context).width*.88),
