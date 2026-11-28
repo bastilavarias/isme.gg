@@ -21,7 +21,8 @@ void main(){
   });
 
   Future<SharedPreferences> open(WidgetTester tester,{bool upgraded=true,bool preview=false,
-    Size size=const Size(412,915),Map<String,Object> saved=const {}})async{
+    Size size=const Size(412,915),Map<String,Object> saved=const {},
+    String version='2.0.1',int code=18})async{
     SharedPreferences.setMockInitialValues(saved);
     final p=await SharedPreferences.getInstance();
     tester.view.physicalSize=size;
@@ -30,7 +31,7 @@ void main(){
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(MaterialApp(theme:cinemaTheme(),home:Scaffold(
       body:Builder(builder:(ctx)=>TextButton(
-        onPressed:()=>WhatsNewController.show(ctx,p,version:'2.0.1',code:18,upgraded:upgraded,preview:preview),
+        onPressed:()=>WhatsNewController.show(ctx,p,version:version,code:code,upgraded:upgraded,preview:preview),
         child:const Text('Open release'))))));
     await tester.tap(find.text('Open release'));
     await tester.pumpAndSettle();
@@ -88,6 +89,32 @@ void main(){
     expect(find.byType(AlertDialog),findsNothing);
     expect(find.text('Open release'),findsOneWidget);
     expect(p.getInt(WhatsNewController.acknowledgedKey),18);
+  });
+  testWidgets('v2.1.0 mobile modal acknowledges once and preserves playback settings',(t)async{
+    final p=await open(t,version:'2.1.0',code:19,saved:{
+      WhatsNewController.acknowledgedKey:18,AppPreferences.nativeDirectKey:false,
+      AppPreferences.fastStartupKey:false,
+    });
+    expect(find.text('Meet Isme! 🐾'),findsOneWidget);
+    expect(find.text('ISME.GG · VERSION 2.1.0'),findsOneWidget);
+    expect(find.text('Cleaner platform icons'),findsOneWidget);
+    await t.runAsync(()=>Future<void>.delayed(appBackGate.cooldown));
+    await t.tap(find.text('Enjoy the show!'));await t.pumpAndSettle();
+    expect(p.getInt(WhatsNewController.acknowledgedKey),19);
+    expect(AppPreferences.nativeDirect(p),isFalse);
+    expect(AppPreferences.fastStartup(p),isFalse);
+    await t.tap(find.text('Open release'));await t.pumpAndSettle();
+    expect(find.byType(AlertDialog),findsNothing);
+  });
+  testWidgets('v2.1.0 TV select acknowledges and debug preview does not persist',(t)async{
+    final p=await open(t,version:'2.1.0',code:19,preview:true,size:const Size(960,540));
+    final button=find.byType(FilledButton);
+    expect(t.widget<FilledButton>(button).autofocus,isTrue);
+    expect(t.getRect(button).bottom,lessThan(540));
+    await t.runAsync(()=>Future<void>.delayed(appBackGate.cooldown));
+    await t.sendKeyEvent(LogicalKeyboardKey.select);await t.pumpAndSettle();
+    expect(find.byType(AlertDialog),findsNothing);
+    expect(p.containsKey(WhatsNewController.acknowledgedKey),isFalse);
   });
   testWidgets('preview leaves acknowledgment and preferences unchanged',(t)async{
     final p=await open(t,preview:true,saved:{AppPreferences.fastStartupKey:false});

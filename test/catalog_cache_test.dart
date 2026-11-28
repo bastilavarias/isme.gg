@@ -52,12 +52,15 @@ void main() {
     await tester.pumpWidget(MaterialApp(home:Scaffold(body:Align(
       alignment:Alignment.topLeft,child:PlatformPill(engine:engine,movie:movie)))));
     await tester.pumpAndSettle();
-    expect(find.text('Disney+'),findsOneWidget);
-    expect(tester.getSize(find.byType(PlatformPill)).width,lessThanOrEqualTo(99));
+    expect(find.byType(ProviderLogoPill),findsOneWidget);
+    expect(find.byType(Image),findsOneWidget);
+    expect(tester.widget<ProviderLogoPill>(find.byType(ProviderLogoPill)).provider,'Disney+');
+    expect(tester.getSize(find.byType(ProviderLogoPill)),const Size.square(19));
     engine.name=null;
     engine.configureProviders('US','');
     await tester.pumpAndSettle();
-    expect(find.text('Disney+'),findsNothing);
+    expect(find.byType(ProviderLogoPill),findsNothing);
+    expect(find.byType(Image),findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

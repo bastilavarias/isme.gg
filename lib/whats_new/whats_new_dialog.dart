@@ -9,9 +9,12 @@ class WhatsNewDialog extends StatelessWidget {
   final bool upgraded, busy;
   final Widget content;
   final Widget headerGraphic;
+  final String? heading, subtitle;
+  final String continueLabel;
   final VoidCallback? onContinue;
   const WhatsNewDialog({super.key, required this.version, required this.upgraded,
     required this.content, required this.onContinue, this.busy=false,
+    this.heading,this.subtitle,this.continueLabel='Continue',
     this.headerGraphic=const Icon(Icons.check_circle_outline,size:44,color:Color(0xFF83C995))});
 
   @override Widget build(BuildContext context)=>BackNavigationScope(
@@ -28,9 +31,9 @@ class WhatsNewDialog extends StatelessWidget {
       title:Column(mainAxisSize:MainAxisSize.min,children:[
         headerGraphic,
         const SizedBox(height:8),
-        Text(upgraded?"You're up to date!":"Welcome to isme.gg",textAlign:TextAlign.center),
+        Text(heading??(upgraded?"You're up to date!":"Welcome to isme.gg"),textAlign:TextAlign.center),
         const SizedBox(height:4),
-        Text(upgraded?'Successfully updated to v$version':'Version $version',
+        Text(subtitle??(upgraded?'Successfully updated to v$version':'Version $version'),
           textAlign:TextAlign.center,style:const TextStyle(fontSize:13,color:CinemaColors.muted)),
       ]),
       content:SizedBox(width:460,child:content),
@@ -42,6 +45,6 @@ class WhatsNewDialog extends StatelessWidget {
             color:states.contains(WidgetState.focused)?CinemaColors.ink:Colors.transparent,width:3)),
         ),
         onPressed:busy?null:onContinue,
-        child:Text(busy?'Saving…':'Continue')))],
+        child:Text(busy?'Saving…':continueLabel)))],
     )));
 }
