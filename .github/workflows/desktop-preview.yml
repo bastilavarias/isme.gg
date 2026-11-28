@@ -2,12 +2,7 @@ name: Desktop preview checks
 on:
   workflow_dispatch:
   push:
-    branches: ['desktop/**']
-    paths:
-      - 'desktop/**'
-      - 'setupdesktop.ps1'
-      - 'toolchain.json'
-      - '.github/workflows/desktop-preview.yml'
+    branches: ['desktop/build-*']
 permissions:
   contents: read
 jobs:
@@ -25,6 +20,12 @@ jobs:
         with:
           flutter-version: ${{ steps.sdk.outputs.flutter }}
           channel: stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: desktop/native-engine/pom.xml
       - name: Generate runner, validate, and compile desktop preview
         shell: pwsh
         run: ./setupdesktop.ps1 -Build

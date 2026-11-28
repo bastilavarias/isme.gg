@@ -4,3 +4,6 @@ linux/
 macos/
 pubspec.lock
 .metadata
+native-engine/target/
+*.iml
+packaging/output/

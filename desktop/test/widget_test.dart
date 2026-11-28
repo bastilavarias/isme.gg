@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ismegg/engine.dart';
 import 'package:ismegg_desktop/catalog.dart';
 import 'package:ismegg_desktop/main.dart';
+import 'package:ismegg_desktop/cinema_scene.dart';
+import 'package:ismegg_desktop/title_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FakeCatalog implements DesktopCatalog{
@@ -31,7 +33,8 @@ void main(){
     await tester.pumpWidget(DesktopApp(prefs:prefs,catalog:FakeCatalog()));
     await tester.pumpAndSettle();
     expect(find.text('Example film'),findsOneWidget);
-    await tester.tap(find.byTooltip('Add to My List'));
+    expect(find.byType(CinemaScene),findsOneWidget);
+    await tester.tap(find.widgetWithText(OutlinedButton,'My List'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ListTile,'My List'));
     await tester.pumpAndSettle();
@@ -43,10 +46,10 @@ void main(){
     expect(find.text('Example film'),findsOneWidget);
     await tester.tap(find.byType(DesktopPoster));
     await tester.pumpAndSettle();
-    expect(find.byType(AlertDialog),findsOneWidget);
-    expect(find.text('Remove from My List'),findsOneWidget);
-    await tester.tap(find.text('Close'));
+    expect(find.byType(DesktopTitlePage),findsOneWidget);
+    expect(find.text('In My List'),findsOneWidget);
+    await tester.tap(find.text('Back to library'));
     await tester.pumpAndSettle();
-    expect(find.byType(AlertDialog),findsNothing);
+    expect(find.byType(DesktopTitlePage),findsNothing);
   });
 }

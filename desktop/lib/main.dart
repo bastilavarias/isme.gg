@@ -9,6 +9,10 @@ import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'catalog.dart';
 import 'local_player.dart';
+import 'cinema_scene.dart';
+import 'title_page.dart';
+import 'native_engine.dart';
+import 'stream_player.dart';
 
 Future<void> main()async{
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +28,10 @@ class DesktopApp extends StatelessWidget{
   @override Widget build(BuildContext context){
     final theme=cinemaTheme();
     return MaterialApp(title:'isme.gg Desktop',debugShowCheckedModeBanner:false,
-      theme:theme.copyWith(textTheme:theme.textTheme.apply(fontFamily:'packages/ismegg/Poppins')),
+      theme:theme.copyWith(
+        colorScheme:theme.colorScheme.copyWith(secondary:CinemaColors.accent,
+          secondaryContainer:CinemaColors.panel,onSecondaryContainer:CinemaColors.ink),
+        textTheme:theme.textTheme.apply(fontFamily:'packages/ismegg/Poppins')),
       home:DesktopHome(prefs:prefs,catalog:catalog));
   }
 }
@@ -41,10 +48,12 @@ class _DesktopHomeState extends State<DesktopHome>{
   final searchFocus=FocusNode();
   final scroll=ScrollController();
   final saved=<String,Movie>{};
+  final watched=<String,Movie>{};
   DesktopPage page=DesktopPage.home;
-  List<Movie> items=[];
+  List<Movie> items=[],pinoy=[],korean=[];
   bool loading=true;
-  bool picking=false;
+  bool picking=false,saving=false;
+  int featuredIndex=0;
   String? error;
   int generation=0;
   Timer? debounce;
@@ -60,7 +69,28 @@ class _DesktopHomeState extends State<DesktopHome>{
         if(m.id.isNotEmpty&&m.title.isNotEmpty)saved[m.id]=m;
       }catch(_){}
     }
+    readWatched();
+    unawaited(loadRegional());
     unawaited(load());
+  }
+  Future<void> loadRegional()async{
+    Future<List<Movie>> read(String name)async{
+      try{
+        final json=jsonDecode(await rootBundle.loadString('assets/catalogs/$name.json')) as Map<String,dynamic>;
+        return CatalogSnapshot.fromJson(json).movies;
+      }catch(_){return [];}
+    }
+    final lists=await Future.wait([read('pinoy'),read('korean')]);
+    if(mounted)setState((){pinoy=lists[0];korean=lists[1];});
+  }
+  void readWatched(){
+    watched.clear();
+    for(final row in widget.prefs.getStringList('desktop.watched.v1')??[]){
+      try{
+        final m=Movie.fromJson(jsonDecode(row) as Map<String,dynamic>);
+        if(m.id.isNotEmpty&&m.title.isNotEmpty)watched[m.id]=m;
+      }catch(_){}
+    }
   }
   @override void dispose(){
     debounce?.cancel();
@@ -86,7 +116,7 @@ class _DesktopHomeState extends State<DesktopHome>{
   void navigate(DesktopPage next){
     debounce?.cancel();
     if(scroll.hasClients)scroll.jumpTo(0);
-    setState(()=>page=next);
+    setState((){page=next;featuredIndex=0;});
     unawaited(load());
     if(next==DesktopPage.search){
       WidgetsBinding.instance.addPostFrameCallback((_){if(mounted&&page==next)searchFocus.requestFocus();});
@@ -99,6 +129,8 @@ class _DesktopHomeState extends State<DesktopHome>{
     debounce=Timer(const Duration(milliseconds:350),()=>unawaited(load()));
   }
   Future<void> toggleSaved(Movie movie)async{
+    if(saving)return;
+    saving=true;
     final wasSaved=saved.containsKey(movie.id);
     final updated=Map<String,Movie>.of(saved);
     if(wasSaved){updated.remove(movie.id);}else{updated[movie.id]=movie;}
@@ -113,7 +145,7 @@ class _DesktopHomeState extends State<DesktopHome>{
       });
     }catch(_){
       if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Could not save your list.')));
-    }
+    }finally{saving=false;}
   }
   Future<void> openVideo()async{
     if(picking)return;
@@ -128,24 +160,53 @@ class _DesktopHomeState extends State<DesktopHome>{
       if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Could not open a video file.')));
     }finally{picking=false;}
   }
+  Future<void> play(Movie movie,{String episode=''})async{
+    if(!DesktopNativeEngine.available){
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Prepare the native desktop engine to watch online.')));
+      return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>
+      DesktopStreamPlayer(movie:movie,prefs:widget.prefs,episode:episode)));
+    if(mounted)setState(readWatched);
+  }
   Future<void> details(Movie m)async{
-    await showDialog<void>(context:context,builder:(ctx)=>AlertDialog(
-      title:Text(m.title),
-      content:SizedBox(width:460,child:SingleChildScrollView(child:Column(
-        mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
-          if(m.art.isNotEmpty)AspectRatio(aspectRatio:16/9,child:CinemaArt(m.art)),
-          const SizedBox(height:12),
-          Text(m.metadata,style:const TextStyle(color:CinemaColors.muted)),
-          const SizedBox(height:12),
-          Text(m.description.isEmpty?'No description available.':m.description),
-          const SizedBox(height:16),
-          const Text('Catalog preview: online playback is not connected yet. Use Open file for videos on your device.',
-            style:TextStyle(color:CinemaColors.muted)),
-        ]))),
-      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Close')),
-        FilledButton.tonal(onPressed:(){Navigator.pop(ctx);unawaited(toggleSaved(m));},
-          child:Text(saved.containsKey(m.id)?'Remove from My List':'Add to My List'))],
-    ));
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>DesktopTitlePage(
+      movie:m,initialSaved:saved.containsKey(m.id),catalog:widget.catalog,
+      onSave:()=>toggleSaved(m),onPlay:(episode)=>play(m,episode:episode))));
+  }
+  Widget poster(Movie m)=>DesktopPoster(key:ValueKey(m.id),movie:m,saved:saved.containsKey(m.id),
+    onOpen:()=>unawaited(details(m)),onSave:()=>unawaited(toggleSaved(m)));
+  Widget cinematicHome(){
+    final candidates=items.where((m)=>m.backdrop.isNotEmpty).take(6).toList();
+    final featured=candidates.isEmpty?items.first:candidates[featuredIndex%candidates.length];
+    final movies=items.where((m)=>!m.episodic&&m.id!=featured.id).toList();
+    final series=items.where((m)=>m.episodic&&m.id!=featured.id).toList();
+    final resume=watched.values.toList();
+    return CustomScrollView(controller:scroll,slivers:[
+      SliverToBoxAdapter(child:LayoutBuilder(builder:(context,box)=>CinemaScene(
+        movie:featured,height:(box.maxWidth*.40).clamp(430.0,720.0).toDouble(),saved:saved.containsKey(featured.id),
+        onSave:()=>unawaited(toggleSaved(featured)),onDetails:()=>unawaited(details(featured)),
+        onPlay:DesktopNativeEngine.available&&!featured.episodic?()=>unawaited(play(featured)):null,
+        footer:candidates.length>1?Row(mainAxisSize:MainAxisSize.min,children:[
+          IconButton(tooltip:'Previous feature',onPressed:()=>setState(()=>featuredIndex=(featuredIndex+candidates.length-1)%candidates.length),icon:const Icon(Icons.chevron_left)),
+          Text('${featuredIndex%candidates.length+1} / ${candidates.length}',style:const TextStyle(color:CinemaColors.muted)),
+          IconButton(tooltip:'Next feature',onPressed:()=>setState(()=>featuredIndex=(featuredIndex+1)%candidates.length),icon:const Icon(Icons.chevron_right)),
+        ]):null,
+      ))),
+      SliverToBoxAdapter(child:CinemaShelf(title:'Continue watching',movies:resume,poster:(m)=>DesktopPoster(
+        movie:m,saved:saved.containsKey(m.id),onSave:()=>unawaited(toggleSaved(m)),
+        onOpen:(){
+          final episode=widget.prefs.getString('desktop.lastEpisode.${m.id}')??'';
+          if(DesktopNativeEngine.available&&(!m.episodic||episode.isNotEmpty)){
+            unawaited(play(m,episode:episode));
+          }else{unawaited(details(m));}
+        }))),
+      SliverToBoxAdapter(child:CinemaShelf(title:'Discover movies',movies:movies,poster:poster)),
+      SliverToBoxAdapter(child:CinemaShelf(title:'Series to explore',movies:series,poster:poster)),
+      SliverToBoxAdapter(child:CinemaShelf(title:'Filipino cinema',movies:pinoy,poster:poster)),
+      SliverToBoxAdapter(child:CinemaShelf(title:'Korean cinema',movies:korean,poster:poster)),
+      SliverToBoxAdapter(child:CinemaShelf(title:'My List',movies:saved.values.toList(),poster:poster)),
+    ]);
   }
 
   @override Widget build(BuildContext context)=>CallbackShortcuts(
@@ -187,8 +248,8 @@ class _DesktopHomeState extends State<DesktopHome>{
           if(page==DesktopPage.search)Padding(padding:const EdgeInsets.fromLTRB(24,0,24,12),child:TextField(
             focusNode:searchFocus,controller:search,onChanged:searchChanged,
             decoration:const InputDecoration(hintText:'Search movies and series',prefixIcon:Icon(Icons.search)))),
-          Padding(padding:const EdgeInsets.fromLTRB(24,0,24,16),child:Text(
-            page==DesktopPage.saved?'Saved on this computer.': 'Discover titles. Online playback is not connected in this preview.',
+          if(page!=DesktopPage.home)Padding(padding:const EdgeInsets.fromLTRB(24,0,24,16),child:Text(
+            page==DesktopPage.saved?'Saved on this computer.': 'Find your next favorite.',
             style:const TextStyle(color:CinemaColors.muted,fontSize:12))),
           Expanded(child:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Padding(
             padding:const EdgeInsets.all(24),child:Column(mainAxisSize:MainAxisSize.min,children:[
@@ -196,14 +257,12 @@ class _DesktopHomeState extends State<DesktopHome>{
               OutlinedButton(onPressed:()=>unawaited(load()),child:const Text('Retry')),
             ]))):items.isEmpty?Center(child:Text(page==DesktopPage.saved?'Your list is empty.':
               page==DesktopPage.search&&search.text.trim().isEmpty?'Search for a title.':'No titles found.')):
-              GridView.builder(
+              page==DesktopPage.home?cinematicHome():GridView.builder(
                 controller:scroll,padding:const EdgeInsets.fromLTRB(24,0,24,24),
                 gridDelegate:const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent:190,mainAxisSpacing:16,crossAxisSpacing:14,childAspectRatio:.59),
+                  maxCrossAxisExtent:234,mainAxisSpacing:24,crossAxisSpacing:20,childAspectRatio:.59),
                 itemCount:items.length,itemBuilder:(context,i){
-                  final m=items[i];
-                  return DesktopPoster(key:ValueKey(m.id),movie:m,saved:saved.containsKey(m.id),
-                    onOpen:()=>unawaited(details(m)),onSave:()=>unawaited(toggleSaved(m)));
+                  return poster(items[i]);
                 }),
             ),
           ],
@@ -220,10 +279,10 @@ class DesktopPoster extends StatefulWidget{
   @override State<DesktopPoster> createState()=>_DesktopPosterState();
 }
 class _DesktopPosterState extends State<DesktopPoster>{
-  bool hovered=false,focused=false;
+  bool hovered=false,focused=false,saveFocused=false;
   @override Widget build(BuildContext context){
     final motion=MediaQuery.disableAnimationsOf(context)?Duration.zero:const Duration(milliseconds:160);
-    final active=hovered||focused;
+    final active=hovered||focused||saveFocused;
     return MouseRegion(cursor:SystemMouseCursors.click,onEnter:(_)=>setState(()=>hovered=true),
       onExit:(_)=>setState(()=>hovered=false),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         Expanded(child:Stack(fit:StackFit.expand,children:[
@@ -239,9 +298,13 @@ class _DesktopPosterState extends State<DesktopPoster>{
                 child:ClipRRect(borderRadius:BorderRadius.circular(5),child:AnimatedScale(
                   duration:motion,scale:active&&!MediaQuery.disableAnimationsOf(context)?1.035:1,
                   child:CinemaArt(widget.movie.poster))))))),
-          Positioned(top:8,right:8,child:IconButton.filledTonal(
-            tooltip:widget.saved?'Remove from My List':'Add to My List',
-            onPressed:widget.onSave,icon:Icon(widget.saved?Icons.bookmark:Icons.bookmark_border))),
+          Positioned(top:8,right:8,child:AnimatedOpacity(
+            duration:motion,opacity:active||widget.saved?1:0,
+            child:Focus(onFocusChange:(v)=>setState(()=>saveFocused=v),skipTraversal:true,
+              child:IconButton(tooltip:widget.saved?'Remove from My List':'Add to My List',
+              style:IconButton.styleFrom(backgroundColor:CinemaColors.canvas.withValues(alpha:.85),
+                foregroundColor:widget.saved?CinemaColors.accent:CinemaColors.ink),
+              onPressed:widget.onSave,icon:Icon(widget.saved?Icons.bookmark:Icons.bookmark_border))))),
         ])),
         const SizedBox(height:7),
         Text(widget.movie.title,maxLines:1,overflow:TextOverflow.ellipsis,style:const TextStyle(fontWeight:FontWeight.w600)),

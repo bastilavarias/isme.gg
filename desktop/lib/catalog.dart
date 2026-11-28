@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:ismegg/engine.dart';
+import 'episode_model.dart';
 
 enum DesktopPage { home, movies, series, search, saved }
 
@@ -18,7 +19,7 @@ class CinemetaDesktopCatalog implements DesktopCatalog {
     if(page==DesktopPage.saved)return [];
     final q=query.trim();
     if(page==DesktopPage.search&&q.isEmpty)return [];
-    final types=page==DesktopPage.series?['series']:page==DesktopPage.search?['movie','series']:['movie'];
+    final types=page==DesktopPage.series?['series']:(page==DesktopPage.search||page==DesktopPage.home)?['movie','series']:['movie'];
     final batches=await Future.wait(types.map((type)=>_fetch(type,q)));
     final seen=<String>{};
     return batches.expand((x)=>x).where((m)=>seen.add(m.id)).toList();
@@ -58,6 +59,25 @@ class CinemetaDesktopCatalog implements DesktopCatalog {
       if(movies.length==50)break;
     }
     return movies;
+  }
+  Future<List<DesktopEpisode>> episodes(Movie movie)async{
+    if(!RegExp(r'^imdb:tt[0-9]{7,10}$').hasMatch(movie.id))return [];
+    final id=movie.id.substring(5);
+    final response=await _client.get(Uri.https(host,'/meta/series/$id.json')).timeout(const Duration(seconds:15));
+    if(response.statusCode!=200||response.bodyBytes.length>4*1024*1024)throw StateError('Episode list unavailable');
+    final data=jsonDecode(response.body);
+    final meta=data is Map?data['meta']:null;
+    final rows=meta is Map?meta['videos']:null;
+    if(rows is! List)return [];
+    final result=<DesktopEpisode>[];
+    for(final row in rows){
+      if(row is! Map)continue;
+      final season=row['season'],number=row['episode'];
+      if(season is! int||number is! int||season<0||number<1)continue;
+      result.add(DesktopEpisode(season,number,row['title']?.toString()??'Episode $number','$id:$season:$number'));
+    }
+    result.sort((a,b)=>a.season==b.season?a.number.compareTo(b.number):a.season.compareTo(b.season));
+    return result;
   }
   @override void close()=>_client.close();
 }

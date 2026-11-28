@@ -1,40 +1,40 @@
-# isme.gg desktop preview
+# isme.gg Desktop — cinematic milestone
 
-Experimental separate Flutter package in the isme.gg repository. Android builds and native Android playback are unchanged. This is the first desktop milestone, not a public release.
+Development branch: desktop/foundation. Separate Flutter package; released Android TV and mobile clients remain untouched. This is a source implementation, not a verified release.
 
-## Windows
+## Design
 
-Prerequisites: pinned Flutter and Dart from the root toolchain.json, Visual Studio with Desktop development with C++, and Windows desktop support. Reuse ISME_FLUTTER_DIR or Flutter on PATH.
+The desktop home prioritizes real, large-format artwork: a manually browsable featured title with restrained crossfades, readable synopsis, responsive poster shelves, Continue Watching, Filipino and Korean cinema snapshots, and My List. Movie/series/search pages retain a responsive grid. Poster controls use the shared dark/warm orange palette, reveal on hover or keyboard focus, and respect reduced motion. Selecting a title opens a full-page cinematic detail view, with season/episode navigation for series.
 
-From repository root:
+## Playback
 
-```powershell
-.\setupdesktop.ps1
-.\setupdesktop.ps1 -Test
-.\setupdesktop.ps1 -Build
-```
+The Java sidecar ports the existing libtorrent4j 2.1.0-39 engine, storage budget and verified-piece reader. It runs as a child process on the local computer, binds only to 127.0.0.1 on an ephemeral port, and requires a fresh 256-bit token for control and byte ranges. The Flutter player uses media_kit with the private authenticated URL. The source picker, retry, mascot, per-episode resume and recent watch shelf are wired. Local video selection remains available. No hosted media relay or uploaded cache. Use media you are authorized to access; source availability is not guaranteed. The source resolver is shared in behavior with Android but copied for this milestone; future changes must reconcile the two implementations.
 
-The launcher prepares the existing Poppins assets, generates the Windows runner in desktop/ when missing, resolves desktop dependencies, and launches or tests the desktop application. The build mode runs analysis/tests before producing an unsigned portable development build. Runner files and desktop lockfile are provisional generated artifacts; commit reproducible runner configuration and a resolved lockfile before a public release. Never ship only the exe: DLLs and data/ must travel with it.
+The sidecar is stopped when the player closes; the parent removes only its own session directory after process exit. Abrupt termination can leave an abandoned temporary directory. No automatic deletion of other sessions is attempted. The 7 GiB selected-file limit and native storage checks remain in place. No production rolling-cache claim.
 
-## Linux (experimental)
+## Windows development (do not run until build approved)
 
-Use the pinned Flutter SDK and distro Flutter Linux prerequisites plus the media_kit/libmpv runtime dependencies documented upstream. From the repository root run dart tools/prepare_fonts.dart, then in desktop/ run flutter create --platforms=linux --project-name ismegg_desktop --org gg.isme --no-pub --empty . followed by flutter pub get and flutter run -d linux. Linux packaging is not validated.
+From the repository root, with pinned Flutter/Dart, Visual Studio C++ toolchain, JDK 21 and Maven:
 
-## Implemented source
+- `.\setupdesktop.ps1` launches the shell using a prepared engine if available.
+- `.\setupdesktop.ps1 -Engine` prepares the Java sidecar, then launches.
+- `.\setupdesktop.ps1 -Test` runs Flutter analysis and widget tests; no public distribution.
+- `.\setupdesktop.ps1 -Build` compiles/tests native and Flutter code, then copies native dependencies and a jlink runtime into the release bundle.
 
-- Responsive desktop sidebar: Home, Movies, Series, Search, My List. Compact icon rail below 1000 logical pixels, scrollable navigation.
-- Live Cinemeta metadata from the same service already used by Android. No fabricated titles; no media availability claim. Movie/series search, title details, loading, retry and empty states.
-- Responsive poster grid, hover feedback, keyboard focus/activation and reduced-motion support. Shared Movie model, CinemaColors and CinemaArt.
-- Local My List persistence in a desktop-only preference key.
-- Native local file picker and in-app media_kit playback for user-selected video files. Adaptive desktop controls provide playback controls and fullscreen; test these on real Windows.
-- Ctrl+K: search. Ctrl+O: open local video. Ctrl+R: refresh. Tab/Enter: navigate and activate. Playback controls provided by media_kit.
+Release directory: desktop/build/windows/x64/runner/Release/. Keep the entire folder together. The optional Inno Setup recipe in packaging/windows.iss is for a later explicitly authorized installer build; it has not been compiled or signed. The user should not need Flutter, Maven or Visual Studio to run a validated packaged bundle.
 
-## Not implemented yet
+The desktop CI workflow runs only for an explicit desktop/build-* branch push or a supported manual dispatch; desktop/foundation changes no longer launch builds automatically. No public release.
 
-Online torrent playback, portable libtorrent4j sidecar, native source discovery, next episode, platform availability metadata, continue watching, production SQLite storage, desktop updater, signing, installers, macOS support. The catalog is metadata-only and explicitly states that online playback is not connected. The local-file player does not silently resolve or fetch title sources.
+## Linux and macOS (experimental)
 
-Next milestone: extract Android-independent Java catalog/torrent components behind the existing authenticated loopback protocol, implement OS-specific storage and credential adapters, package native binaries, validate cancellation/seek/cleanup with authorized test media, then connect desktop player to that interface. Preserve client-only processing and keep Android regression checks independent. Review libmpv and native binary distribution licenses before public packaging.
+`bash desktop/setup-unix.sh run|test|build` provisions a generated runner for the current OS, prepares the Maven sidecar and optionally bundles the Java runtime. Existing platform prerequisites must already be installed; the script does not install packages. Linux currently targets the x64 Flutter output layout. macOS sandbox behavior, JNI architecture, signing/notarization and native library loading remain unverified. Do not distribute unsigned or untested bundles.
 
-## Validation
+## Validation before public release
 
-Desktop test source covers catalog parsing, navigation, resize, detail dialog and persisted saved titles. Desktop CI workflow generates the runner, runs Flutter analyzer and widget tests, then builds a Windows artifact; does not publish. Manual checks: resize small/large windows, keyboard focus, reduced motion, real network loading, local video opening, seek, audio, fullscreen/exit, cancellation, closing/reopening. No SDK on SEBASTECH; actual compilation, rendering, dependency resolution, and playback need Windows/CI validation.
+- Compile the native engine, run range unit tests, run Flutter analyzer and widget tests, and verify runner and dependency lock reproducibility.
+- On Windows, test resize, keyboard focus, hover/reduced motion, real artwork, navigation, saved titles, series/episode selection, local video, and fullscreen.
+- On authorized seeded test media, measure startup, verified range reads, seek, buffer, source switching, timeouts, progress persistence, cancellation, stale sessions, process exit and cache cleanup. Test authentication failures and native binaries.
+- Verify portable bundle on a clean Windows machine without Java/Flutter/Visual Studio; test installer, licensing notices and required VC runtime.
+- Validate Linux and macOS separately; macOS signing and entitlements need real-machine checks.
+
+Still pending: production-grade desktop update channel and signing, release dependency lock, full Android catalog/provider metadata parity, episode auto-preparation, adaptive buffering, SQLite migration, robust crash recovery and all runtime/platform checks. No claim of production parity. Do not bump Android version or merge to main before desktop validation.
