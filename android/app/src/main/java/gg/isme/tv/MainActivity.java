@@ -6,7 +6,12 @@ import android.net.Uri;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.util.Log;
 import android.view.View;
+import android.view.WindowManager;
 import java.util.HashMap;
 import java.util.Map;
 import io.flutter.embedding.android.FlutterActivity;
@@ -17,11 +22,37 @@ public final class MainActivity extends FlutterActivity {
     private LocalCinemaServer cinema;
     private UpdateFlow updater;
     private boolean tv;
-    private boolean keepPlaybackScreenOn;
+    private static final String SCREEN_TAG = "IsmeScreenAwake";
+    private static final int SCREEN_FLAG = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
+    private static final long SCREEN_LEASE_MS = 45_000L;
+    private static final long SCREEN_CHECK_MS = 5_000L;
+    private final Handler screenHandler = new Handler(Looper.getMainLooper());
+    private long screenLeaseUntil;
     private boolean foreground;
-    private void applyPlaybackScreenFlag() {
-        if (foreground && keepPlaybackScreenOn) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    private final Runnable screenCheck = this::applyPlaybackScreenFlag;
+
+    private boolean applyPlaybackScreenFlag() {
+        screenHandler.removeCallbacks(screenCheck);
+        final long now = SystemClock.elapsedRealtime();
+        final boolean active = foreground && screenLeaseUntil > now;
+        final View decor = getWindow().getDecorView();
+        final boolean windowOn = (getWindow().getAttributes().flags & SCREEN_FLAG) != 0;
+        if (windowOn != active || decor.getKeepScreenOn() != active) {
+            decor.setKeepScreenOn(active);
+            if (active) getWindow().addFlags(SCREEN_FLAG);
+            else getWindow().clearFlags(SCREEN_FLAG);
+            Log.i(SCREEN_TAG, "Keep screen awake=" + active + " foreground=" + foreground);
+        }
+        if (active) screenHandler.postDelayed(screenCheck, Math.min(SCREEN_CHECK_MS, screenLeaseUntil - now));
+        final boolean flagApplied = (getWindow().getAttributes().flags & SCREEN_FLAG) != 0;
+        // Acknowledge enable only when both protections are set; acknowledge
+        // disable only when both have been cleared.
+        return active ? flagApplied && decor.getKeepScreenOn() : flagApplied || decor.getKeepScreenOn();
+    }
+
+    private boolean setPlaybackScreenOn(boolean active) {
+        screenLeaseUntil = active ? SystemClock.elapsedRealtime() + SCREEN_LEASE_MS : 0;
+        return applyPlaybackScreenFlag();
     }
     @Override protected void onCreate(Bundle state) {
         tv = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_TYPE_MASK)
@@ -135,9 +166,7 @@ public final class MainActivity extends FlutterActivity {
                         result.success(accepted);
                     } catch (Exception e) { result.error("RESET", "Could not clear app data", null); }
                 } else if ("setPlaybackScreenOn".equals(call.method)) {
-                    keepPlaybackScreenOn = Boolean.TRUE.equals(call.argument("active"));
-                    applyPlaybackScreenFlag();
-                    result.success(null);
+                    result.success(setPlaybackScreenOn(Boolean.TRUE.equals(call.argument("active"))));
                 } else if ("setPlaybackActive".equals(call.method)) {
                     if (updater != null) updater.playback(Boolean.TRUE.equals(call.argument("active")));
                     result.success(null);
@@ -145,8 +174,17 @@ public final class MainActivity extends FlutterActivity {
             });
     }
     @Override protected void onResume() { super.onResume(); foreground = true; applyPlaybackScreenFlag(); if (updater != null) updater.resume(); }
-    @Override protected void onPause() { foreground = false; keepPlaybackScreenOn = false; applyPlaybackScreenFlag(); if (updater != null) updater.pause(); super.onPause(); }
+    @Override protected void onPause() { foreground = false; applyPlaybackScreenFlag(); if (updater != null) updater.pause(); super.onPause(); }
+    @Override protected void onStop() { screenLeaseUntil = 0; applyPlaybackScreenFlag(); super.onStop(); }
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && foreground && screenLeaseUntil > SystemClock.elapsedRealtime()) applyPlaybackScreenFlag();
+    }
     @Override protected void onDestroy() {
+        foreground = false;
+        screenLeaseUntil = 0;
+        applyPlaybackScreenFlag();
+        screenHandler.removeCallbacks(screenCheck);
         if (updater != null) updater.close();
         if (cinema != null) cinema.close();
         super.onDestroy();

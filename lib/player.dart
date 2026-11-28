@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'playback_recovery.dart';
+import 'playback_screen_guard.dart';
 import 'playback_mascot.dart';
 import 'adaptive_buffering.dart';
 import 'player_preferences.dart';
@@ -390,10 +391,10 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
   Future<void> start({int index=0,bool resetBudget=true}) async {
     if(closed||!mounted)return;
     final old=pending;
-    syncPlaybackScreen(false);
     final n=++generation;
     cancelAttempt();subtitleRevision++;audioRevision++;recommendedAudioId=null;audioTracks=[];watchdog?.cancel();saveTimer?.cancel();hide?.cancel();
     if(resetBudget){recovery.reset();lastFault='none';lastFailureDetail=null;wantsPlayback=_foreground;}
+    syncPlaybackScreen(wantsPlayback);
     nativeState={};_resetNext();
     setState((){busy=true;error=null;progress=0;source=index;controls=true;phase='Opening media';});
     if(old!=null){
@@ -435,7 +436,10 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
         final next=DateTime.now().isBefore(overall)?nextSource(classifyPlaybackError(e)):null;
         if(next==null){
           try{await widget.engine.stop();}catch(_){}
-          if(active(n))setState((){error=storageFailureMessage(e)??'Unable to play this media after ${recovery.total} attempt(s). Retry or choose another source.';busy=false;phase='Stopped';});
+          if(active(n)){
+            syncPlaybackScreen(false);
+            setState((){error=storageFailureMessage(e)??'Unable to play this media after ${recovery.total} attempt(s). Retry or choose another source.';busy=false;phase='Stopped';});
+          }
           return;
         }
         candidate=next;
@@ -672,12 +676,10 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(controls){armControlsTimer();if(widget.engine.tv&&moveControl(key))return KeyEventResult.handled;}
     return KeyEventResult.ignored;
   }
-  bool _screenOn=false;
+  late final _screenGuard=PlaybackScreenGuard(widget.engine.setPlaybackScreenOn,
+    onFailure:()=>debugPrint('IsmeScreenAwake: native screen state not acknowledged'));
   void syncPlaybackScreen(bool active){
-    final next=active&&_foreground&&!closed&&AppPreferences.awake(widget.history.prefs);
-    if(next==_screenOn)return;
-    _screenOn=next;
-    unawaited(widget.engine.setPlaybackScreenOn(next));
+    _screenGuard.update(active&&_foreground&&!closed&&AppPreferences.awake(widget.history.prefs));
   }
   Future<void> setPlaying(bool value) async{
     final c=player;if(c==null||closed||busy)return;
@@ -858,7 +860,7 @@ class _CinemaPlayerState extends State<CinemaPlayer> with WidgetsBindingObserver
     if(mounted&&!closed)setState((){});
   }
   Future<void> shutdown() async {
-    if(closed)return;syncPlaybackScreen(false);closed=true;generation++;subtitleRevision++;cancelAttempt();hide?.cancel();saveTimer?.cancel();watchdog?.cancel();_stopCountdown();_cancelPreparation();
+    if(closed)return;_screenGuard.dispose();closed=true;generation++;subtitleRevision++;cancelAttempt();hide?.cancel();saveTimer?.cancel();watchdog?.cancel();_stopCountdown();_cancelPreparation();
     final c=player;player=null;
     if(c!=null){await save(c);try{await disposePlayback(c);}catch(_){}}
     // Cancel engine while a pending initialization/poll is in flight.

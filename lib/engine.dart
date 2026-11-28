@@ -292,9 +292,8 @@ class NativeEngine {
     _providerMemo.clear();providerRevision.value++;
   }
   Future<bool> clearLocalData() async=>await channel.invokeMethod<bool>('clearLocalData')??false;
-  Future<void> setPlaybackScreenOn(bool active) async {
-    try{await channel.invokeMethod<void>('setPlaybackScreenOn',{'active':active});}catch(_){}
-  }
+  Future<bool> setPlaybackScreenOn(bool active) async =>
+    await channel.invokeMethod<bool>('setPlaybackScreenOn',{'active':active})??false;
   Future<void> setPlaybackActive(bool active) async {
     try{await channel.invokeMethod<void>('setPlaybackActive',{'active':active});}catch(_){}
   }
