@@ -41,9 +41,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B -m unittest discover -s tools -p 'test_*website*.py'
-          mkdir -p site/assets/{screenshots,fonts,posters,platforms}
+          mkdir -p site/assets/{screenshots,fonts,posters,platforms,brands} site/compatibility site/data
           cp web/index.html web/robots.txt web/sitemap.xml web/llms.txt site/
-          cp web/assets/{hero.js,releases.js,tmdb.svg,isme-p2p-preview.jpg} site/assets/
+          cp web/compatibility/index.html site/compatibility/
+          cp web/data/compatibility.json site/data/
+          cp web/assets/brands/tcl.svg site/assets/brands/
+          cp web/assets/{hero.js,releases.js,tmdb.svg,isme-p2p-preview.jpg,isme-orbital.svg,compatibility.js} site/assets/
           cp web/assets/fonts/{nunito-latin.woff2,OFL.txt} site/assets/fonts/
           cp web/assets/screenshots/{tv-hero.gif,tv-hero.webm,tv-hero.mp4,tv-hero-poster.webp,tv-home.png,tv-showcase.png,mobile-home.png,mobile-details.png,player-showcase.png} site/assets/screenshots/
           cp web/assets/posters/{movies,series,anime,pinoy,kdrama}.webp site/assets/posters/

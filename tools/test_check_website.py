@@ -31,6 +31,38 @@ class WebsiteValidationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Root-relative URL"):
                 check_site(root)
 
+    def test_nested_pages_and_registry_assets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assets/brands").mkdir(parents=True)
+            (root / "data").mkdir()
+            (root / "compatibility").mkdir()
+            (root / "assets/releases.json").touch()
+            (root / "assets/brands/tcl.svg").touch()
+            (root / "assets/brands/other.svg").touch()
+            (root / "assets/compatibility.js").touch()
+            (root / "index.html").write_text(
+                '<a id="download" href="compatibility/">Compatibility</a>', encoding="utf-8")
+            (root / "compatibility/index.html").write_text(
+                '<a href="../#download">Download</a>'
+                '<img src="../assets/brands/tcl.svg">'
+                '<script src="../assets/compatibility.js"></script>', encoding="utf-8")
+            registry = root / "data/compatibility.json"
+            registry.write_text('[{"logo":"../assets/brands/other.svg"}]', encoding="utf-8")
+            check_site(root)
+
+            (root / "assets/brands/other.svg").unlink()
+            with self.assertRaisesRegex(ValueError, "Missing local file: ../assets/brands/other.svg"):
+                check_site(root)
+            (root / "assets/brands/other.svg").touch()
+            registry.unlink()
+            with self.assertRaisesRegex(ValueError, "Missing local file: ../data/compatibility.json"):
+                check_site(root)
+            registry.write_text('[]', encoding="utf-8")
+            (root / "assets/compatibility.js").unlink()
+            with self.assertRaisesRegex(ValueError, "Missing local file: ../assets/compatibility.js"):
+                check_site(root)
+
 
 if __name__ == "__main__":
     unittest.main()
