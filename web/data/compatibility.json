@@ -1,0 +1,13 @@
+[
+  {
+    "brand": "TCL",
+    "title": "TCL Smart TVs",
+    "logo": "../assets/brands/tcl.svg",
+    "platform": "Android TV / Google TV (exact OS unverified)",
+    "status": "investigating",
+    "issue": "Playback remains at 0% and repeatedly retries.",
+    "affected": "One television reported. Exact model, app version and root cause are not confirmed. This is not a brand-wide incompatibility.",
+    "date": "2026-11-28",
+    "source": "https://commons.wikimedia.org/wiki/File:Logo_of_the_TCL_Corporation.svg"
+  }
+]

@@ -78,16 +78,16 @@ class _IsmePainter extends CustomPainter {
   final IsmePlaybackPose pose;
   final Animation<double> loop;
 
-  static const fur = Color(0xFF292A30);
-  static const lightFur = Color(0xFF3C3D45);
-  static const outline = Color(0xFF71727B);
-  static const innerEar = Color(0xFF795461);
-  static const dark = Color(0xFF101116);
-  static const iris = Color(0xFF936B50);
-  static const collar = Color(0xFFE63245);
+  static const fur = Color(0xFF101013);
+  static const lightFur = Color(0xFF49484A);
+  static const outline = Color(0xFF777477);
+  static const innerEar = Color(0xFF2B2A2D);
+  static const dark = Color(0xFF08080A);
+  static const iris = Color(0xFF777477);
+  static const collar = Color(0xFFFF8617);
   static const cream = Color(0xFFFFE3A0);
   static const white = CinemaColors.ink;
-  static const accent = CinemaColors.accent;
+  static const accent = collar;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -115,6 +115,10 @@ class _IsmePainter extends CustomPainter {
     void dot(double x,double y,double radius,Color color) =>
       canvas.drawCircle(Offset(x,y),radius,fill(color));
 
+    final orbit=Rect.fromCircle(center:const Offset(120,115),radius:84);
+    canvas.drawArc(orbit,3.92,1.58,false,stroke(accent,4));
+    canvas.drawArc(orbit,.24,.64,false,stroke(accent,4));
+    canvas.drawArc(orbit,2.25,.64,false,stroke(accent,4));
     oval(120,213,66,7, dark);
     final tail = Path()..moveTo(145,187)..quadraticBezierTo(191,198,194,162+wave*7)
       ..quadraticBezierTo(202,145+wave*7,207,158+wave*7)
@@ -137,19 +141,30 @@ class _IsmePainter extends CustomPainter {
     canvas.translate(120,112);
     canvas.rotate(tilt);
     canvas.translate(-120,-112);
-    // Oversized, sideways-pointing ears from Isme's reference photos.
-    shape(Path()..moveTo(85,92)..quadraticBezierTo(32,93,26,22)
-      ..quadraticBezierTo(50,44,78,46)..quadraticBezierTo(105,53,95,83)..close(),fur,true);
-    shape(Path()..moveTo(155,92)..quadraticBezierTo(208,93,214,22)
-      ..quadraticBezierTo(190,44,162,46)..quadraticBezierTo(135,53,145,83)..close(),fur,true);
-    shape(Path()..moveTo(81,76)..quadraticBezierTo(48,74,36,38)
-      ..quadraticBezierTo(58,54,78,58)..quadraticBezierTo(91,63,81,76)..close(),innerEar);
-    shape(Path()..moveTo(159,76)..quadraticBezierTo(192,74,204,38)
-      ..quadraticBezierTo(182,54,162,58)..quadraticBezierTo(149,63,159,76)..close(),innerEar);
-    shape(Path()..moveTo(71,102)..cubicTo(73,65,93,58,120,58)
-      ..cubicTo(147,58,167,65,169,102)..cubicTo(174,134,147,158,120,159)
-      ..cubicTo(93,158,66,134,71,102)..close(),fur,true);
-    oval(120,134,24,19,lightFur);
+    // Continuous silhouette, tapered muzzle and swept ears match the orbital mark.
+    final head=Path()..moveTo(98,63)
+      ..cubicTo(80,46,59,52,35,29)..cubicTo(17,13,22,55,31,69)
+      ..quadraticBezierTo(39,84,55,92)..quadraticBezierTo(60,108,77,114)
+      ..cubicTo(84,120,83,139,101,151)..quadraticBezierTo(120,169,139,151)
+      ..cubicTo(157,139,156,120,163,114)..quadraticBezierTo(180,108,185,92)
+      ..quadraticBezierTo(201,84,209,69)..cubicTo(218,55,223,13,205,29)
+      ..cubicTo(181,52,160,46,142,63)..quadraticBezierTo(120,55,98,63)..close();
+    shape(head,fur);
+    canvas.drawPath(head,stroke(accent,3.8));
+    for(final sign in [-1.0,1.0]){
+      canvas.save();canvas.translate(120,0);canvas.scale(sign,1);
+      shape(Path()..moveTo(83,43)..quadraticBezierTo(66,57,48,57)
+        ..lineTo(37,69)..lineTo(48,68)..lineTo(42,80)..lineTo(61,86)
+        ..lineTo(53,93)..quadraticBezierTo(72,81,77,70)..close(),innerEar);
+      shape(Path()..moveTo(11,70)..quadraticBezierTo(26,65,39,80)
+        ..lineTo(27,74)..quadraticBezierTo(17,71,11,70)..close(),lightFur);
+      shape(Path()..moveTo(12,98)..quadraticBezierTo(25,84,40,99)
+        ..lineTo(42,108)..quadraticBezierTo(28,94,12,98)..close(),lightFur);
+      canvas.restore();
+    }
+    shape(Path()..moveTo(124,111)..quadraticBezierTo(117,125,112,132)
+      ..quadraticBezierTo(102,129,100,139)..quadraticBezierTo(105,155,122,155)
+      ..quadraticBezierTo(142,153,142,141)..quadraticBezierTo(132,131,124,111)..close(),lightFur);
     for (final x in [96.0,144.0]) {
       oval(x,109,12,14,dark,true);
       final look = pose == IsmePlaybackPose.finding ? wave*3 : 0.0;
@@ -157,6 +172,7 @@ class _IsmePainter extends CustomPainter {
       oval(x+look,110,5.5,7,dark);
       dot(x+look-2,105,2.9,white);
       dot(x+look+3,114,1.2,white);
+      canvas.drawArc(Rect.fromCenter(center:Offset(x,109),width:21,height:23),.75,1.25,false,stroke(outline,1.4));
     }
     shape(Path()..moveTo(109,126)..quadraticBezierTo(120,120,131,126)
       ..quadraticBezierTo(135,133,120,140)..quadraticBezierTo(105,133,109,126)..close(),dark);

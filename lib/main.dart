@@ -55,7 +55,7 @@ class _IsmeAppState extends State<IsmeApp> {
 Widget deviceHome(NativeEngine engine,History history)=>engine.tv?CinemaHome(engine:engine,history:history):MobileHome(engine:engine,history:history);
 class Wordmark extends StatelessWidget {
   final double size;const Wordmark({super.key,this.size=24});
-  @override Widget build(BuildContext context)=>Text.rich(TextSpan(style:TextStyle(fontSize:size,fontWeight:FontWeight.w800,letterSpacing:-1.2,color:CinemaColors.ink),children:const [TextSpan(text:'isme'),TextSpan(text:'.',style:TextStyle(color:CinemaColors.accent)),TextSpan(text:'gg')]));
+  @override Widget build(BuildContext context)=>Text.rich(TextSpan(style:TextStyle(fontSize:size,fontWeight:FontWeight.w800,letterSpacing:-1.2,color:CinemaColors.ink),children:const [TextSpan(text:'isme'),TextSpan(text:'.gg',style:TextStyle(color:Color(0xFFFF8617)))]));
 }
 class CinemaHome extends StatefulWidget {
   final NativeEngine engine;final History history;
